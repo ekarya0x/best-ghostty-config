@@ -181,9 +181,9 @@ The quick terminal is a dropdown terminal that slides from the top of your scree
 
 Properties:
 - Drops down from the top of the screen your mouse is on.
-- Takes up 40% of screen height.
 - Auto-hides when you click away.
 - Animates in 0.15 seconds.
+- Appears on whichever screen your mouse is on.
 - Requires macOS Accessibility permissions (System Settings > Privacy & Security > Accessibility) and Login Items.
 
 ---
@@ -201,7 +201,7 @@ Properties:
 | `font-feature` | calt, liga | Contextual alternates and ligatures (e.g. `!=` renders as a single glyph) |
 | `theme` | Catppuccin Latte / Mocha | Auto-switches light/dark with macOS system appearance |
 | `background-opacity` | 0.8 | 80% opaque background |
-| `background-blur-radius` | 20 | Blur behind the transparent background |
+| `background-blur` | 20 | Blur behind the transparent background (intensity 20) |
 | `macos-titlebar-style` | tabs | Tabs integrated into the macOS titlebar |
 | `window-colorspace` | display-p3 | Wide color gamut rendering |
 | `window-padding-x/y` | 12 | 12px padding on all sides |
@@ -218,10 +218,10 @@ Properties:
 | `mouse-hide-while-typing` | true | Hides mouse cursor while you type |
 | `copy-on-select` | clipboard | Selecting text automatically copies to clipboard |
 | `link-url` | true | URLs are clickable |
-| `mouse-scroll-multiplier` | 2 | 2x scroll speed |
+| `mouse-scroll-multiplier` | 2 | Normalized 2x scroll speed across all input devices |
 | `shell-integration` | detect | Auto-detects your shell for integration features |
 | `clipboard-paste-protection` | true | Warns before pasting potentially dangerous content |
-| `clipboard-trim-trailing-whitespace` | true | Strips trailing whitespace when copying |
+| `clipboard-trim-trailing-spaces` | true | Strips trailing whitespace when copying |
 | `macos-option-as-alt` | left | Left Option key behaves as Alt |
 | `command` | tmux new-session -A -s main | Auto-launches tmux on every new Ghostty window |
 | `scrollback-limit` | 25000000 | 25MB scrollback buffer |

@@ -16,7 +16,7 @@ window-theme = auto
 
 # Window & Appearance
 background-opacity = 0.8
-background-blur-radius = 20
+background-blur = 20
 macos-titlebar-style = tabs
 window-colorspace = display-p3
 window-padding-x = 12
@@ -43,7 +43,6 @@ quick-terminal-position = top
 quick-terminal-screen = mouse
 quick-terminal-autohide = true
 quick-terminal-animation-duration = 0.15
-quick-terminal-size = 40%
 
 # Mouse Behavior
 mouse-hide-while-typing = true
@@ -60,7 +59,7 @@ clipboard-paste-protection = true
 clipboard-paste-bracketed-safe = true
 clipboard-read = allow
 clipboard-write = allow
-clipboard-trim-trailing-whitespace = true
+clipboard-trim-trailing-spaces = true
 
 # macOS Specific
 macos-option-as-alt = left
