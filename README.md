@@ -9,18 +9,62 @@ git clone https://github.com/ekarya0x/best-ghostty-config.git ~/.ghostty-config
 cd ~/.ghostty-config && chmod +x install.sh && ./install.sh
 ```
 
-This creates two symlinks. Existing configs are backed up with a `.bak` timestamp.
+`install.sh` handles everything: installs tmux if missing, patches the tmux binary path for your architecture, disables the macOS Ctrl+Space conflict, checks for JetBrains Mono, and symlinks configs into place. Existing configs are backed up with a `.bak` timestamp.
 
-| Source | Target |
-|---|---|
-| `config` | `~/.config/ghostty/config` |
-| `tmux.conf` | `~/.tmux.conf` |
+| Source | Target | Notes |
+|---|---|---|
+| `config` | `~/.config/ghostty/config` | XDG location |
+| `config` | `~/Library/Application Support/com.mitchellh.ghostty/config` | macOS App Support (higher priority — must also be symlinked) |
+| `tmux.conf` | `~/.tmux.conf` | |
 
 ## Requirements
 
 - [Ghostty](https://ghostty.org/) 1.2+
-- [tmux](https://github.com/tmux/tmux) 3.2+
+- [tmux](https://github.com/tmux/tmux) 3.2+ (`install.sh` will offer to `brew install` it)
 - [JetBrains Mono](https://www.jetbrains.com/lp/mono/) font
+
+## Troubleshooting
+
+**Is this an immediate-fix issue?**
+
+Yes. If either config precedence or `Ctrl+Space` is wrong, tmux prefix workflows fail completely (pane/window/session shortcuts become unusable).
+
+**Ghostty crashes on launch with `exec: tmux: not found`**
+
+This config sets `command = /opt/homebrew/bin/tmux new-session -A -s main`. Ghostty spawns `bash --noprofile --norc`, so Homebrew is not on PATH. The binary must be an absolute path. Re-run `install.sh` — it detects your tmux path and patches the config.
+
+**tmux keybindings don't work (Ctrl+Space prefix ignored)**
+
+macOS captures `Ctrl+Space` for input source switching. Fix: System Settings → Keyboard → Keyboard Shortcuts → Input Sources → uncheck "Select the previous input source." `install.sh` offers to do this automatically.
+
+**Config changes have no effect**
+
+Ghostty on macOS reads from `~/Library/Application Support/com.mitchellh.ghostty/config` with higher priority than `~/.config/ghostty/config`. If a stale file exists at the App Support path, it shadows the XDG symlink. Re-run `install.sh` to fix both locations.
+
+**Am I being hacked if I see an App Support config overriding my dotfile?**
+
+Usually no. This is normal Ghostty/macOS path precedence, not evidence of compromise by itself. The installer now always manages both config locations to prevent shadowing.
+
+### Verification Checklist (Pass/Fail)
+
+Run these after install:
+
+```bash
+ls -la ~/.config/ghostty/config
+ls -la "$HOME/Library/Application Support/com.mitchellh.ghostty/config"
+grep '^command = ' ./config
+grep -n 'PlistBuddy' ./install.sh
+grep -n '^set -g prefix C-Space' ./tmux.conf
+/usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:enabled" "$HOME/Library/Preferences/com.apple.symbolichotkeys.plist"
+```
+
+Expected:
+
+- both config paths are symlinks to this repo's `config`
+- `command = /.../tmux new-session -A -s main` (absolute tmux path)
+- `install.sh` contains `PlistBuddy`-based Ctrl+Space handling
+- `tmux.conf` prefix is `C-Space`
+- symbolic hotkey 60 prints `false`
 
 ---
 
@@ -117,7 +161,7 @@ Every setting below differs from the stock Ghostty 1.2.3 defaults. Settings left
 
 | Setting | Default | Ours | Why |
 |---|---|---|---|
-| `command` | *(none)* | `tmux new-session -A -s main` | Every Ghostty window auto-launches into a persistent tmux session named `main`. The `-A` flag attaches to an existing session if one exists, otherwise creates it. Sessions survive Ghostty closing, laptop sleep, and SSH disconnects. |
+| `command` | *(none)* | `/opt/homebrew/bin/tmux new-session -A -s main` | Every Ghostty window auto-launches into a persistent tmux session named `main`. The `-A` flag attaches to an existing session if one exists, otherwise creates it. Sessions survive Ghostty closing, laptop sleep, and SSH disconnects. Uses absolute path because Ghostty spawns `bash --noprofile --norc`, which has no Homebrew PATH. `install.sh` auto-patches the path for your system (Intel: `/usr/local/bin/tmux`). |
 
 ### Scrollback
 
