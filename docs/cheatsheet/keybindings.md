@@ -1,6 +1,6 @@
 # Keybindings Cheat Sheet
 
-This config ships two layers of keybindings: Ghostty (the terminal) and tmux (the multiplexer inside it). Ghostty keybindings use `Cmd` combos. tmux keybindings use a prefix key (`Ctrl+Space`) followed by a single key.
+This config ships two layers of keybindings: Ghostty (the terminal) and tmux (the multiplexer inside it). Ghostty keybindings use `Cmd` combos. tmux keybindings use a prefix key (`Ctrl+Space` primary, `Ctrl+A` fallback) followed by a single key.
 
 When you open Ghostty, tmux launches automatically into a persistent session called `main`.
 
@@ -72,9 +72,11 @@ Ghostty has its own split system independent of tmux. These create Ghostty-nativ
 
 tmux keybindings require pressing the prefix key first, then the action key. The prefix is:
 
-**`Ctrl + Space`**
+**`Ctrl + Space`** (fallback: **`Ctrl + A`**)
 
 Press and release the prefix, then press the action key. Example: to split a pane right, press `Ctrl+Space`, release, then press `|`.
+
+If `Ctrl+Space` is intercepted, use `Ctrl+A`. This config also maps `C-@` (NUL) as a prefix alias because some terminal/input paths encode `Ctrl+Space` as `C-@`.
 
 ### Panes
 
