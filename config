@@ -25,6 +25,7 @@ window-padding-balance = true
 window-height = 30
 window-width = 120
 window-save-state = always
+window-inherit-working-directory = true
 confirm-close-surface = false
 
 # Cursor
@@ -59,10 +60,14 @@ clipboard-paste-protection = true
 clipboard-paste-bracketed-safe = true
 clipboard-read = allow
 clipboard-write = allow
+clipboard-trim-trailing-whitespace = true
 
 # macOS Specific
 macos-option-as-alt = left
 macos-window-shadow = true
+
+# tmux Auto-Launch
+command = tmux new-session -A -s main
 
 # Performance & Scrollback
 scrollback-limit = 25000000
@@ -96,8 +101,8 @@ keybind = cmd+6=goto_tab:6
 keybind = cmd+7=goto_tab:7
 keybind = cmd+8=goto_tab:8
 keybind = cmd+9=goto_tab:9
-keybind = cmd+shift+comma=move_tab:-1
-keybind = cmd+shift+period=move_tab:1
+keybind = cmd+ctrl+shift+left=move_tab:-1
+keybind = cmd+ctrl+shift+right=move_tab:1
 
 # Splits
 keybind = cmd+d=new_split:right
