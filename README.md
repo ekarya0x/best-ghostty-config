@@ -27,7 +27,7 @@ cd ~/.ghostty-config && chmod +x install.sh && ./install.sh
 
 **Is this an immediate-fix issue?**
 
-Yes. If either config precedence or `Ctrl+Space` is wrong, tmux prefix workflows fail completely (pane/window/session shortcuts become unusable).
+Yes. If config precedence is wrong, tmux workflows fail completely. If `Ctrl+Space` is intercepted, use the built-in fallback prefix `Ctrl+A`.
 
 **Ghostty crashes on launch with `exec: tmux: not found`**
 
@@ -36,6 +36,7 @@ This config sets `command = /opt/homebrew/bin/tmux new-session -A -s main`. Ghos
 **tmux keybindings don't work (Ctrl+Space prefix ignored)**
 
 macOS captures `Ctrl+Space` for input source switching. Fix: System Settings → Keyboard → Keyboard Shortcuts → Input Sources → uncheck "Select the previous input source." `install.sh` offers to do this automatically.
+If `Ctrl+Space` still does not reach tmux, use `Ctrl+A` as fallback prefix (configured as `prefix2`).
 
 **Config changes have no effect**
 
@@ -55,6 +56,7 @@ ls -la "$HOME/Library/Application Support/com.mitchellh.ghostty/config"
 grep '^command = ' ./config
 grep -n 'PlistBuddy' ./install.sh
 grep -n '^set -g prefix C-Space' ./tmux.conf
+grep -n '^set -g prefix2 C-a' ./tmux.conf
 /usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:enabled" "$HOME/Library/Preferences/com.apple.symbolichotkeys.plist"
 ```
 
@@ -63,7 +65,7 @@ Expected:
 - both config paths are symlinks to this repo's `config`
 - `command = /.../tmux new-session -A -s main` (absolute tmux path)
 - `install.sh` contains `PlistBuddy`-based Ctrl+Space handling
-- `tmux.conf` prefix is `C-Space`
+- `tmux.conf` has `prefix = C-Space` and `prefix2 = C-a`
 - symbolic hotkey 60 prints `false`
 
 ---
@@ -221,7 +223,7 @@ Ghostty handles the terminal (theme, rendering, opacity, blur). tmux handles the
 
 ### tmux Keybindings
 
-Prefix: **`Ctrl + Space`**
+Prefix: **`Ctrl + Space`** (fallback: **`Ctrl + A`**)
 
 Press and release the prefix, then press the action key.
 
@@ -278,7 +280,7 @@ tmux ls                           # list sessions
 
 | Setting | Default | Ours | Why |
 |---|---|---|---|
-| `prefix` | `C-b` | `C-Space` | `Ctrl+B` is hard to reach and conflicts with readline backward-char. `Ctrl+Space` is on home row and has no terminal conflicts. |
+| `prefix` | `C-b` | `C-Space` (`prefix2`: `C-a`) | `Ctrl+Space` is ergonomic, and `Ctrl+A` provides a robust fallback if upstream input methods or OS hooks swallow `Ctrl+Space`. |
 | `default-terminal` | `screen` | `tmux-256color` | Correct terminfo for 256-color and true-color support. `screen` misidentifies capabilities. |
 | `terminal-overrides` | *(none)* | `xterm-ghostty:RGB` | Tells tmux that Ghostty supports 24-bit true color. Without this, tmux falls back to 256-color approximation. |
 | `extended-keys` | `off` | `on` | Enables CSI-u key reporting. Applications inside tmux receive full modifier information (Ctrl+Shift+A vs Ctrl+A). |
