@@ -173,6 +173,24 @@ handle_macos_app_support() {
     link_file "$REPO_DIR/config" "$MACOS_CONFIG/config" "Ghostty (macOS App Support)"
 }
 
+reload_tmux_if_running() {
+    if ! command -v tmux &>/dev/null; then
+        return 0
+    fi
+
+    if tmux ls &>/dev/null; then
+        if tmux source-file "$HOME/.tmux.conf" &>/dev/null; then
+            log_success "Reloaded tmux config in running server."
+            local p1 p2
+            p1="$(tmux show -gv prefix 2>/dev/null || echo "unknown")"
+            p2="$(tmux show -gv prefix2 2>/dev/null || echo "unknown")"
+            log_info "tmux prefixes active: ${p1} (primary), ${p2} (fallback)"
+        else
+            log_warn "tmux server detected but config reload failed. Run: tmux source-file ~/.tmux.conf"
+        fi
+    fi
+}
+
 # --- Main ---
 
 main() {
@@ -190,6 +208,7 @@ main() {
     link_file "$REPO_DIR/config" "$XDG_CONFIG/config" "Ghostty (XDG)"
     handle_macos_app_support
     link_file "$REPO_DIR/tmux.conf" "$HOME/.tmux.conf" "tmux"
+    reload_tmux_if_running
 
     echo ""
     log_success "Done. Quit Ghostty (Cmd+Q) and relaunch."

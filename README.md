@@ -37,6 +37,20 @@ This config sets `command = /opt/homebrew/bin/tmux new-session -A -s main`. Ghos
 
 macOS captures `Ctrl+Space` for input source switching. Fix: System Settings → Keyboard → Keyboard Shortcuts → Input Sources → uncheck "Select the previous input source." `install.sh` offers to do this automatically.
 If `Ctrl+Space` still does not reach tmux, use `Ctrl+A` as fallback prefix (configured as `prefix2`).
+This config also maps `C-@` (NUL), since some terminals send `Ctrl+Space` as `C-@`.
+
+**Right-click tmux menu works, but keyboard keybinds do not**
+
+This means tmux is running, but prefix key delivery is failing. Re-apply live config and verify prefix mapping:
+
+```bash
+tmux source-file ~/.tmux.conf
+tmux show -gv prefix
+tmux show -gv prefix2
+tmux list-keys -T root | grep 'C-@'
+```
+
+Then test `Ctrl+Space` + `h` and `Ctrl+A` + `h`.
 
 **Config changes have no effect**
 
@@ -57,6 +71,7 @@ grep '^command = ' ./config
 grep -n 'PlistBuddy' ./install.sh
 grep -n '^set -g prefix C-Space' ./tmux.conf
 grep -n '^set -g prefix2 C-a' ./tmux.conf
+grep -n 'bind -n C-@ switch-client -T prefix' ./tmux.conf
 /usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:60:enabled" "$HOME/Library/Preferences/com.apple.symbolichotkeys.plist"
 ```
 
@@ -65,7 +80,7 @@ Expected:
 - both config paths are symlinks to this repo's `config`
 - `command = /.../tmux new-session -A -s main` (absolute tmux path)
 - `install.sh` contains `PlistBuddy`-based Ctrl+Space handling
-- `tmux.conf` has `prefix = C-Space` and `prefix2 = C-a`
+- `tmux.conf` has `prefix = C-Space`, `prefix2 = C-a`, and `C-@` prefix alias
 - symbolic hotkey 60 prints `false`
 
 ---
@@ -280,7 +295,7 @@ tmux ls                           # list sessions
 
 | Setting | Default | Ours | Why |
 |---|---|---|---|
-| `prefix` | `C-b` | `C-Space` (`prefix2`: `C-a`) | `Ctrl+Space` is ergonomic, and `Ctrl+A` provides a robust fallback if upstream input methods or OS hooks swallow `Ctrl+Space`. |
+| `prefix` | `C-b` | `C-Space` (`prefix2`: `C-a`, `C-@` alias) | `Ctrl+Space` is ergonomic, `Ctrl+A` is a robust fallback, and `C-@` alias covers terminals that encode `Ctrl+Space` as NUL. |
 | `default-terminal` | `screen` | `tmux-256color` | Correct terminfo for 256-color and true-color support. `screen` misidentifies capabilities. |
 | `terminal-overrides` | *(none)* | `xterm-ghostty:RGB` | Tells tmux that Ghostty supports 24-bit true color. Without this, tmux falls back to 256-color approximation. |
 | `extended-keys` | `off` | `on` | Enables CSI-u key reporting. Applications inside tmux receive full modifier information (Ctrl+Shift+A vs Ctrl+A). |
