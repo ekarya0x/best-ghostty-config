@@ -66,7 +66,12 @@ macos-option-as-alt = left
 macos-window-shadow = true
 
 # tmux Auto-Launch
-command = tmux new-session -A -s main
+# REQUIRES: tmux installed (brew install tmux)
+# Uses an explicit launcher script so each new Ghostty tab gets an
+# independent tmux session instead of attaching to a singleton.
+# install.sh standardizes this path and symlinks the launcher for you.
+# To use Ghostty without tmux, comment out the line below.
+command = ~/.config/ghostty/ghostty-tmux.sh
 
 # Performance & Scrollback
 scrollback-limit = 25000000

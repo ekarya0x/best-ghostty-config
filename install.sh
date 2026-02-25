@@ -4,6 +4,7 @@ set -euo pipefail
 readonly REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly XDG_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty"
 readonly MACOS_CONFIG="$HOME/Library/Application Support/com.mitchellh.ghostty"
+readonly XDG_LAUNCHER="${XDG_CONFIG}/ghostty-tmux.sh"
 
 log_info() { echo -e "\033[1;34m[INFO]\033[0m $1"; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
@@ -19,7 +20,7 @@ check_tmux() {
     fi
 
     log_warn "tmux is not installed."
-    log_info "This config sets 'command = <path>/tmux new-session -A -s main'."
+    log_info "This config launches tmux through ghostty-tmux.sh."
     log_info "Ghostty will crash on launch without tmux."
     echo ""
 
@@ -105,27 +106,31 @@ disable_macos_ctrl_space() {
     /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:60:enabled bool false" "$plist" &>/dev/null
 }
 
-# --- Path patching ---
+# --- Launcher patching ---
 
-patch_tmux_path() {
-    local tmux_path
-    tmux_path="$(command -v tmux 2>/dev/null)" || log_error "tmux not found after dependency check."
+patch_launcher_command() {
+    local launcher_file="$REPO_DIR/ghostty-tmux.sh"
+    [[ -f "$launcher_file" ]] || log_error "Launcher missing: $launcher_file"
+    chmod +x "$launcher_file"
 
+    local escaped_launcher="$XDG_LAUNCHER"
+    escaped_launcher="${escaped_launcher//&/\\&}"
+    escaped_launcher="${escaped_launcher// /\\ }"
     local config_file="$REPO_DIR/config"
     local current
     current="$(grep '^command = ' "$config_file" || true)"
 
-    local expected="command = ${tmux_path} new-session -A -s main"
+    local expected="command = ${escaped_launcher}"
     if [[ "$current" == "$expected" ]]; then
-        log_success "tmux path already correct: $tmux_path"
+        log_success "Ghostty command already points to launcher."
         return 0
     fi
 
     if [[ -z "$current" ]]; then
-        log_info "No 'command' line in config. Appending tmux auto-launch command."
+        log_info "No 'command' line in config. Appending launcher command."
         echo "$expected" >> "$config_file"
     else
-        log_info "Patching tmux path: $tmux_path"
+        log_info "Patching Ghostty command to launcher."
         sed -i.tmp "s|^command = .*|$expected|" "$config_file"
         rm -f "${config_file}.tmp"
     fi
@@ -202,10 +207,11 @@ main() {
     check_tmux
     check_font
     check_macos_ctrl_space
-    patch_tmux_path
+    patch_launcher_command
 
     echo ""
     link_file "$REPO_DIR/config" "$XDG_CONFIG/config" "Ghostty (XDG)"
+    link_file "$REPO_DIR/ghostty-tmux.sh" "$XDG_LAUNCHER" "Ghostty tmux launcher"
     handle_macos_app_support
     link_file "$REPO_DIR/tmux.conf" "$HOME/.tmux.conf" "tmux"
     reload_tmux_if_running

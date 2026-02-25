@@ -9,13 +9,25 @@ git clone https://github.com/ekarya0x/best-ghostty-config.git ~/.ghostty-config
 cd ~/.ghostty-config && chmod +x install.sh && ./install.sh
 ```
 
-`install.sh` handles everything: installs tmux if missing, patches the tmux binary path for your architecture, disables the macOS Ctrl+Space conflict, checks for JetBrains Mono, and symlinks configs into place. Existing configs are backed up with a `.bak` timestamp.
+`install.sh` handles everything: installs tmux if missing, wires Ghostty to a launcher script that fixes the tab/session bug, disables the macOS Ctrl+Space conflict, checks for JetBrains Mono, and symlinks configs into place. Existing configs are backed up with a `.bak` timestamp.
 
 | Source | Target | Notes |
 |---|---|---|
 | `config` | `~/.config/ghostty/config` | XDG location |
+| `ghostty-tmux.sh` | `~/.config/ghostty/ghostty-tmux.sh` | Launcher used by `command = ...` |
 | `config` | `~/Library/Application Support/com.mitchellh.ghostty/config` | macOS App Support (higher priority — must also be symlinked) |
 | `tmux.conf` | `~/.tmux.conf` | |
+
+## Update Local Install
+
+```bash
+cd ~/.ghostty-config
+git pull --ff-only
+./install.sh
+tmux source-file ~/.tmux.conf
+```
+
+Then fully quit Ghostty (`Cmd+Q`) and relaunch.
 
 ## Requirements
 
@@ -31,7 +43,18 @@ Yes. If config precedence is wrong, tmux workflows fail completely. If `Ctrl+Spa
 
 **Ghostty crashes on launch with `exec: tmux: not found`**
 
-This config sets `command = /opt/homebrew/bin/tmux new-session -A -s main`. Ghostty spawns `bash --noprofile --norc`, so Homebrew is not on PATH. The binary must be an absolute path. Re-run `install.sh` — it detects your tmux path and patches the config.
+This config launches tmux through `~/.config/ghostty/ghostty-tmux.sh`. That launcher adds common Homebrew paths and resolves tmux robustly. Re-run `install.sh` so the launcher symlink and `command = ...` line are refreshed.
+
+**New Ghostty tabs still mirror one tmux session**
+
+If every `Cmd+T` still lands in the same `main` session, your active config is stale and still uses `tmux new-session -A -s main`. Re-run `install.sh`, then verify:
+
+```bash
+grep '^command = ' ~/.config/ghostty/config
+readlink ~/.config/ghostty/ghostty-tmux.sh
+```
+
+Expected command target: an absolute path ending in `/.config/ghostty/ghostty-tmux.sh`.
 
 **tmux keybindings don't work (Ctrl+Space prefix ignored)**
 
@@ -66,6 +89,7 @@ Run these after install:
 
 ```bash
 ls -la ~/.config/ghostty/config
+ls -la ~/.config/ghostty/ghostty-tmux.sh
 ls -la "$HOME/Library/Application Support/com.mitchellh.ghostty/config"
 grep '^command = ' ./config
 grep -n 'PlistBuddy' ./install.sh
@@ -78,7 +102,8 @@ grep -n 'bind -n C-@ switch-client -T prefix' ./tmux.conf
 Expected:
 
 - both config paths are symlinks to this repo's `config`
-- `command = /.../tmux new-session -A -s main` (absolute tmux path)
+- `~/.config/ghostty/ghostty-tmux.sh` exists and is executable
+- `command = .../ghostty-tmux.sh`
 - `install.sh` contains `PlistBuddy`-based Ctrl+Space handling
 - `tmux.conf` has `prefix = C-Space`, `prefix2 = C-a`, and `C-@` prefix alias
 - symbolic hotkey 60 prints `false`
@@ -178,7 +203,7 @@ Every setting below differs from the stock Ghostty 1.2.3 defaults. Settings left
 
 | Setting | Default | Ours | Why |
 |---|---|---|---|
-| `command` | *(none)* | `/opt/homebrew/bin/tmux new-session -A -s main` | Every Ghostty window auto-launches into a persistent tmux session named `main`. The `-A` flag attaches to an existing session if one exists, otherwise creates it. Sessions survive Ghostty closing, laptop sleep, and SSH disconnects. Uses absolute path because Ghostty spawns `bash --noprofile --norc`, which has no Homebrew PATH. `install.sh` auto-patches the path for your system (Intel: `/usr/local/bin/tmux`). |
+| `command` | *(none)* | `~/.config/ghostty/ghostty-tmux.sh` | Uses a launcher script instead of direct `tmux -A` so new Ghostty tabs no longer mirror one singleton session. Behavior: first tab creates/attaches `main`; subsequent tabs create independent sessions (`main-2`, `main-3`, ...). |
 
 ### Scrollback
 
@@ -233,7 +258,8 @@ All other Ghostty defaults remain active. This includes:
 Ghostty handles the terminal (theme, rendering, opacity, blur). tmux handles the multiplexer (panes, windows, session persistence). This separation means:
 
 - **Persistence.** tmux sessions survive when Ghostty closes, when your laptop sleeps, and when SSH connections drop.
-- **Remote attach.** `ssh your-host -t tmux attach -t main` from any device — phone, tablet, another laptop — over Tailscale or any SSH transport.
+- **Session-per-tab.** each new Ghostty tab creates an independent tmux session (`main`, `main-2`, `main-3`, ...), eliminating mirrored tabs.
+- **Remote attach.** `ssh your-host -t tmux attach -t <session-name>` from any device — phone, tablet, another laptop — over Tailscale or any SSH transport.
 - **Portable layout.** Your pane arrangement travels with the session, not the terminal window.
 
 ### tmux Keybindings
@@ -270,8 +296,9 @@ Press and release the prefix, then press the action key.
 | `prefix + d` | Detach (session keeps running) |
 
 ```bash
-tmux attach -t main              # reattach locally
-ssh host -t tmux attach -t main   # reattach remotely
+tmux attach -t main               # reattach to main locally
+tmux attach -t main-2             # reattach to another tab session
+ssh host -t tmux attach -t main-2 # reattach remotely
 tmux ls                           # list sessions
 ```
 
@@ -318,6 +345,7 @@ tmux ls                           # list sessions
 ```
 best-ghostty-config/
   config              Ghostty configuration
+  ghostty-tmux.sh     tmux launcher (fixes tab/session behavior)
   tmux.conf           tmux configuration
   install.sh          Symlink installer with backup
   docs/

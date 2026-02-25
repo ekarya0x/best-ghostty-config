@@ -2,7 +2,9 @@
 
 This config ships two layers of keybindings: Ghostty (the terminal) and tmux (the multiplexer inside it). Ghostty keybindings use `Cmd` combos. tmux keybindings use a prefix key (`Ctrl+Space` primary, `Ctrl+A` fallback) followed by a single key.
 
-When you open Ghostty, tmux launches automatically into a persistent session called `main`.
+When you open Ghostty, tmux launches automatically:
+- first tab attaches/creates `main`
+- each additional Ghostty tab gets a new independent session (`main-2`, `main-3`, ...)
 
 ---
 
@@ -125,6 +127,7 @@ Reattach from any terminal:
 
 ```
 tmux attach -t main
+tmux attach -t main-2
 ```
 
 Reattach over SSH (e.g. via Tailscale):
@@ -225,7 +228,7 @@ Properties:
 | `clipboard-paste-protection` | true | Warns before pasting potentially dangerous content |
 | `clipboard-trim-trailing-spaces` | true | Strips trailing whitespace when copying |
 | `macos-option-as-alt` | left | Left Option key behaves as Alt |
-| `command` | tmux new-session -A -s main | Auto-launches tmux on every new Ghostty window |
+| `command` | ~/.config/ghostty/ghostty-tmux.sh | Uses a launcher so each Ghostty tab gets an independent tmux session instead of mirroring one singleton |
 | `scrollback-limit` | 25000000 | 25MB scrollback buffer |
 
 ### What tmux sets
