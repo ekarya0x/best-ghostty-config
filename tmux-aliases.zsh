@@ -1,23 +1,23 @@
 #!/usr/bin/env zsh
 
-# dmux shortcuts for fast session navigation and safe cleanup.
+# tmux shortcuts for fast session navigation and safe cleanup.
 # Load from ~/.zshrc:
-#   [[ -f ~/.config/ghostty/dmux-aliases.zsh ]] && source ~/.config/ghostty/dmux-aliases.zsh
+#   [[ -f ~/.config/ghostty/tmux-aliases.zsh ]] && source ~/.config/ghostty/tmux-aliases.zsh
 
-alias dls='tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}"'
-alias dmain='dgo main'
+alias tls='tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}"'
+alias tmain='tgo main'
 
-dgo() {
+tgo() {
     local target="$1"
     if [[ -z "$target" ]]; then
-        echo "usage: dgo <session>"
-        dls
+        echo "usage: tgo <session>"
+        tls
         return 1
     fi
 
     if ! tmux has-session -t "$target" 2>/dev/null; then
         echo "session not found: $target"
-        dls
+        tls
         return 1
     fi
 
@@ -28,7 +28,7 @@ dgo() {
     fi
 }
 
-dnew() {
+tnew() {
     local name="${1:-}"
     local cwd="${2:-$PWD}"
 
@@ -45,12 +45,12 @@ dnew() {
     fi
 
     tmux new-session -Ad -s "$name" -c "$cwd" || return 1
-    dgo "$name"
+    tgo "$name"
 }
 
-dprev() {
+tprev() {
     if [[ -z "${TMUX:-}" ]]; then
-        echo "dprev works inside tmux only"
+        echo "tprev works inside tmux only"
         return 1
     fi
 
@@ -70,21 +70,21 @@ dprev() {
     tmux switch-client -t "$target"
 }
 
-dkill() {
+tkill() {
     local target="${1:-}"
 
     if [[ -z "$target" ]]; then
         if [[ -n "${TMUX:-}" ]]; then
             target="$(tmux display-message -p '#S' 2>/dev/null)"
         else
-            echo "usage: dkill <session>"
+            echo "usage: tkill <session>"
             return 1
         fi
     fi
 
     if ! tmux has-session -t "$target" 2>/dev/null; then
         echo "session not found: $target"
-        dls
+        tls
         return 1
     fi
 
@@ -104,15 +104,15 @@ dkill() {
     tmux kill-session -t "$target"
 }
 
-dkillc() {
+tkillc() {
     if [[ -z "${TMUX:-}" ]]; then
-        echo "dkillc works inside tmux only"
+        echo "tkillc works inside tmux only"
         return 1
     fi
-    dkill "$(tmux display-message -p '#S' 2>/dev/null)"
+    tkill "$(tmux display-message -p '#S' 2>/dev/null)"
 }
 
-dprune() {
+tprune() {
     local keep=""
     local killed=0
 

@@ -41,6 +41,7 @@ readonly LOCK_DIR="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.lock"
 readonly PENDING_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.pending"
 readonly CLAIMED_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.claimed"
 readonly MODE_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.mode"
+readonly FILL_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.fill"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 
@@ -193,6 +194,76 @@ set_batch_mode_if_needed() {
     printf '%s\n' "$BATCH_MODE" > "$MODE_FILE"
 }
 
+session_is_claimed() {
+    local session_name="$1"
+    local claimed=""
+    if [[ -f "$CLAIMED_FILE" ]]; then
+        claimed="$(cat "$CLAIMED_FILE")"
+    fi
+    printf '%s\n' "$claimed" | grep -qxF "$session_name"
+}
+
+count_unclaimed_unattached_sessions() {
+    local count=0
+    local name attached
+    while IFS=' ' read -r name attached; do
+        [[ -n "$name" ]] || continue
+        [[ "$attached" == "0" ]] || continue
+        [[ "$name" == "_bgc_restore" ]] && continue
+        if ! session_is_claimed "$name"; then
+            count=$((count + 1))
+        fi
+    done < <(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)
+
+    printf '%s\n' "$count"
+}
+
+open_ghostty_tab() {
+    # Auto-fill tabs is only needed on macOS where Ghostty restore may reopen
+    # fewer tabs than detached tmux sessions.
+    [[ "$(uname)" == "Darwin" ]] || return 1
+    [[ -x /usr/bin/osascript ]] || return 1
+
+    /usr/bin/osascript >/dev/null 2>&1 <<'APPLESCRIPT'
+tell application "Ghostty" to activate
+tell application "System Events"
+    keystroke "t" using command down
+end tell
+APPLESCRIPT
+}
+
+fill_restore_tabs_if_needed() {
+    # Only meaningful for real interactive launches.
+    [[ "$NO_ATTACH" == "1" ]] && return 0
+    [[ "$BATCH_MODE" == "restore" ]] || return 0
+    [[ "$pending" -eq 1 ]] || return 0
+
+    # One helper per batch.
+    if [[ -f "$FILL_FILE" ]]; then
+        return 0
+    fi
+    printf '%s\n' "$$" > "$FILL_FILE"
+
+    (
+        # Let Ghostty finish launching its own restored tabs first.
+        sleep 0.8
+        acquire_lock
+        local missing
+        missing="$(count_unclaimed_unattached_sessions)"
+        release_lock
+
+        if [[ -z "$missing" || "$missing" -le 0 ]]; then
+            exit 0
+        fi
+
+        local i
+        for ((i = 0; i < missing; i++)); do
+            open_ghostty_tab || break
+            sleep 0.12
+        done
+    ) >/dev/null 2>&1 &
+}
+
 # ---------------------------------------------------------------------------
 # Reattachment helper — find existing unattached sessions from a prior launch
 # ---------------------------------------------------------------------------
@@ -201,21 +272,27 @@ set_batch_mode_if_needed() {
 # sessions that orphan the old ones, we pick the lowest-numbered unattached
 # session that hasn't already been claimed in this launch batch.
 find_unattached_session() {
-    local claimed=""
-    if [[ -f "$CLAIMED_FILE" ]]; then
-        claimed="$(cat "$CLAIMED_FILE")"
-    fi
-
-    local best="" best_num=999999
+    local best=""
+    local best_rank=""
     while IFS=' ' read -r name attached; do
-        if [[ "$attached" == "0" && "$name" =~ ^${BASE_SESSION}-([0-9]+)$ ]]; then
-            local num="${BASH_REMATCH[1]}"
-            if ! printf '%s\n' "$claimed" | grep -qxF "$name"; then
-                if (( num < best_num )); then
-                    best="$name"
-                    best_num="$num"
-                fi
-            fi
+        [[ -n "$name" ]] || continue
+        [[ "$attached" == "0" ]] || continue
+        [[ "$name" == "_bgc_restore" ]] && continue
+        [[ "$name" == "$BASE_SESSION" ]] && continue
+        if session_is_claimed "$name"; then
+            continue
+        fi
+
+        local rank=""
+        if [[ "$name" =~ ^${BASE_SESSION}-([0-9]+)$ ]]; then
+            rank="$(printf '0-%08d' "${BASH_REMATCH[1]}")"
+        else
+            rank="1-${name}"
+        fi
+
+        if [[ -z "$best_rank" || "$rank" < "$best_rank" ]]; then
+            best="$name"
+            best_rank="$rank"
         fi
     done < <(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)
 
@@ -224,6 +301,25 @@ find_unattached_session() {
         return 0
     fi
     return 1
+}
+
+cleanup_stale_batch_files_if_needed() {
+    # If no batch is active, clear stale metadata from prior launches.
+    if [[ ! -f "$PENDING_FILE" ]]; then
+        rm -f "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+    fi
+
+    # Clean up stale pending counter (e.g., from a previous batch that finished).
+    if [[ -f "$PENDING_FILE" ]]; then
+        local local_age
+        local_age="$(file_age_seconds "$PENDING_FILE")"
+        if (( local_age > PENDING_STALE_SECONDS )); then
+            rm -f "$PENDING_FILE"
+            rm -f "$CLAIMED_FILE"
+            rm -f "$MODE_FILE"
+            rm -f "$FILL_FILE"
+        fi
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -286,20 +382,7 @@ unset TMUX || true
 # ---------------------------------------------------------------------------
 acquire_lock
 
-# If no batch is active, clear stale metadata from prior launches.
-if [[ ! -f "$PENDING_FILE" ]]; then
-    rm -f "$CLAIMED_FILE" "$MODE_FILE"
-fi
-
-# Clean up stale pending counter (e.g., from a previous batch that finished).
-if [[ -f "$PENDING_FILE" ]]; then
-    local_age="$(file_age_seconds "$PENDING_FILE")"
-    if (( local_age > PENDING_STALE_SECONDS )); then
-        rm -f "$PENDING_FILE"
-        rm -f "$CLAIMED_FILE"
-        rm -f "$MODE_FILE"
-    fi
-fi
+cleanup_stale_batch_files_if_needed
 
 # Read and increment the pending-instance counter.
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
@@ -314,6 +397,10 @@ resurrect_restore_if_needed
 #   - restore: Ghostty relaunch with detached surviving sessions
 #   - normal:  regular interactive tab/pane creation
 set_batch_mode_if_needed
+
+# Start a background helper that opens any missing Ghostty tabs to ensure
+# every detached tmux session gets reattached during restore launches.
+fill_restore_tabs_if_needed
 
 # 1. No tmux server or no base session → create base session detached, then
 #    attach. The session exists before any other instance can run, preventing
@@ -346,8 +433,8 @@ if (( pending == 1 && client_count == 0 )); then
 fi
 
 # In restore mode (Ghostty relaunch), reattach tabs 2+ to existing detached
-# BASE_SESSION-N sessions before creating anything new. In normal mode (live
-# usage), always create a fresh session for each new tab/pane/window.
+# sessions before creating anything new. In normal mode (live usage), always
+# create a fresh session for each new tab/pane/window.
 if [[ "$BATCH_MODE" == "restore" && "$pending" -gt 1 ]]; then
     unattached="$(find_unattached_session || true)"
     if [[ -n "$unattached" ]]; then

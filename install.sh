@@ -7,8 +7,8 @@ readonly DEFAULT_XDG_CONFIG="$HOME/.config/ghostty"
 readonly MACOS_CONFIG="$HOME/Library/Application Support/com.mitchellh.ghostty"
 readonly XDG_LAUNCHER="${XDG_CONFIG}/ghostty-tmux.sh"
 readonly DEFAULT_XDG_LAUNCHER="${DEFAULT_XDG_CONFIG}/ghostty-tmux.sh"
-readonly XDG_DMUX_ALIASES="${XDG_CONFIG}/dmux-aliases.zsh"
-readonly DEFAULT_XDG_DMUX_ALIASES="${DEFAULT_XDG_CONFIG}/dmux-aliases.zsh"
+readonly XDG_TMUX_ALIASES="${XDG_CONFIG}/tmux-aliases.zsh"
+readonly DEFAULT_XDG_TMUX_ALIASES="${DEFAULT_XDG_CONFIG}/tmux-aliases.zsh"
 
 log_info() { echo -e "\033[1;34m[INFO]\033[0m $1"; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
@@ -179,37 +179,46 @@ link_launcher_paths() {
     fi
 }
 
-link_dmux_aliases() {
-    local aliases_source="$REPO_DIR/dmux-aliases.zsh"
+link_tmux_aliases() {
+    local aliases_source="$REPO_DIR/tmux-aliases.zsh"
     [[ -f "$aliases_source" ]] || return 0
 
     # Keep ~/.config path canonical to avoid shell startup conditionals.
-    link_file "$aliases_source" "$DEFAULT_XDG_DMUX_ALIASES" "dmux aliases (~/.config)"
+    link_file "$aliases_source" "$DEFAULT_XDG_TMUX_ALIASES" "tmux aliases (~/.config)"
 
-    if [[ "$XDG_DMUX_ALIASES" != "$DEFAULT_XDG_DMUX_ALIASES" ]]; then
-        link_file "$aliases_source" "$XDG_DMUX_ALIASES" "dmux aliases (XDG)"
+    if [[ "$XDG_TMUX_ALIASES" != "$DEFAULT_XDG_TMUX_ALIASES" ]]; then
+        link_file "$aliases_source" "$XDG_TMUX_ALIASES" "tmux aliases (XDG)"
     fi
+
+    # Remove legacy filename from earlier installs.
+    rm -f "$DEFAULT_XDG_CONFIG/dmux-aliases.zsh" "$XDG_CONFIG/dmux-aliases.zsh" 2>/dev/null || true
 }
 
-ensure_zsh_sources_dmux_aliases() {
+ensure_zsh_sources_tmux_aliases() {
     local zshrc="$HOME/.zshrc"
-    local source_line='[[ -f ~/.config/ghostty/dmux-aliases.zsh ]] && source ~/.config/ghostty/dmux-aliases.zsh'
+    local source_line='[[ -f ~/.config/ghostty/tmux-aliases.zsh ]] && source ~/.config/ghostty/tmux-aliases.zsh'
+    local legacy_line='[[ -f ~/.config/ghostty/dmux-aliases.zsh ]] && source ~/.config/ghostty/dmux-aliases.zsh'
 
     if [[ ! -f "$zshrc" ]]; then
         touch "$zshrc"
     fi
 
+    if grep -Fqx "$legacy_line" "$zshrc"; then
+        awk -v old="$legacy_line" -v new="$source_line" '{ if ($0 == old) print new; else print $0 }' "$zshrc" > "${zshrc}.tmp"
+        mv "${zshrc}.tmp" "$zshrc"
+    fi
+
     if grep -Fqx "$source_line" "$zshrc"; then
-        log_success "zsh already sources dmux aliases."
+        log_success "zsh already sources tmux aliases."
         return 0
     fi
 
     {
         echo ""
-        echo "# dmux aliases (best-ghostty-config)"
+        echo "# tmux aliases (best-ghostty-config)"
         echo "$source_line"
     } >> "$zshrc"
-    log_success "Added dmux aliases source line to ~/.zshrc."
+    log_success "Added tmux aliases source line to ~/.zshrc."
 }
 
 # --- Symlink management ---
@@ -289,10 +298,10 @@ main() {
     echo ""
     link_file "$REPO_DIR/config" "$XDG_CONFIG/config" "Ghostty (XDG)"
     link_launcher_paths
-    link_dmux_aliases
+    link_tmux_aliases
     handle_macos_app_support
     link_file "$REPO_DIR/tmux.conf" "$HOME/.tmux.conf" "tmux"
-    ensure_zsh_sources_dmux_aliases
+    ensure_zsh_sources_tmux_aliases
     reload_tmux_if_running
 
     echo ""

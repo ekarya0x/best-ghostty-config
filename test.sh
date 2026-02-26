@@ -13,6 +13,7 @@ LOCK_DIR="/tmp/ghostty-tmux-${STATE_KEY}.lock"
 PENDING_FILE="/tmp/ghostty-tmux-${STATE_KEY}.pending"
 CLAIMED_FILE="/tmp/ghostty-tmux-${STATE_KEY}.claimed"
 MODE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.mode"
+FILL_FILE="/tmp/ghostty-tmux-${STATE_KEY}.fill"
 
 green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[1;31m%s\033[0m\n' "$1"; }
@@ -46,7 +47,7 @@ check_ok() {
 
 wipe() {
     tmux -L "$SOCKET" kill-server 2>/dev/null || true
-    rm -rf "$LOCK_DIR" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+    rm -rf "$LOCK_DIR" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 }
 
 trap 'wipe' EXIT
@@ -147,7 +148,7 @@ bold ""
 bold "─── 5. GHOSTTY RESTART (reattach to surviving sessions) ───"
 # ============================================================================
 # Sessions survive from test 4. Clear batch state to simulate fresh launch.
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "reattach: tab 1 → main" "main" "$r1"
 check "reattach: tab 2 → main-2" "main-2" "$r2"
@@ -159,7 +160,7 @@ check "reattach: no orphans (still 4)" "4" "$(sess_count)"
 bold ""
 bold "─── 6. DOUBLE RESTART (reattach twice in a row) ───"
 # ============================================================================
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "2nd reattach: tab 1 → main" "main" "$r1"
 check "2nd reattach: tab 2 → main-2" "main-2" "$r2"
@@ -211,7 +212,7 @@ check "gaps: tab 1 → main" "main" "$r1"
 check "gaps: tab 2 → main-3 (lowest unattached)" "main-3" "$r2"
 check "gaps: tab 3 → main-7 (next lowest)" "main-7" "$r3"
 # A 4th tab should create a new session, filling gap at main-2
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 # Need to re-enter batch mode — start a fresh batch with existing 3 sessions
 wipe
 tmux -L "$SOCKET" new-session -d -s main
@@ -227,7 +228,7 @@ bold "─── 10. FORCE_NEW_SESSION ENV VAR ───"
 wipe
 run >/dev/null  # create base
 sleep 4
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
 check "force new: creates main-2" "main-2" "$r"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
@@ -312,10 +313,11 @@ tmux -L "$SOCKET" new-session -d -s main-notanumber
 r1=$(run); r2=$(run); r3=$(run)
 check "foreign: tab 1 → main" "main" "$r1"
 check "foreign: tab 2 → main-2" "main-2" "$r2"
-check "foreign: tab 3 → main-3 (new, ignores foreign)" "main-3" "$r3"
-# Foreign sessions still exist
+# Restore mode now reattaches non-base detached sessions too.
+check "foreign: tab 3 → main-notanumber (reattach existing)" "main-notanumber" "$r3"
+# No new session needed in this case.
 total=$(sess_count)
-check "foreign: 6 total sessions (3 ours + 3 foreign)" "6" "$total"
+check "foreign: still 5 total sessions" "5" "$total"
 
 # ============================================================================
 bold ""
@@ -450,10 +452,13 @@ check_ok "has check_macos_ctrl_space()" grep -q 'check_macos_ctrl_space()' "$is"
 check_ok "has install_tpm_plugins()" grep -q 'install_tpm_plugins()' "$is"
 check_ok "has prepare_launcher_script()" grep -q 'prepare_launcher_script()' "$is"
 check_ok "has link_file()" grep -q 'link_file()' "$is"
+check_ok "has link_tmux_aliases()" grep -q 'link_tmux_aliases()' "$is"
+check_ok "has ensure_zsh_sources_tmux_aliases()" grep -q 'ensure_zsh_sources_tmux_aliases()' "$is"
 check_ok "has handle_macos_app_support()" grep -q 'handle_macos_app_support()' "$is"
 check_ok "has reload_tmux_if_running()" grep -q 'reload_tmux_if_running()' "$is"
 check_ok "main calls install_tpm_plugins" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q install_tpm_plugins'
 check_ok "main calls reload_tmux_if_running" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q reload_tmux_if_running'
+check_ok "main calls link_tmux_aliases" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q link_tmux_aliases'
 check_ok "TPM cloned with --depth 1" grep -q 'clone --depth 1' "$is"
 
 # ============================================================================
@@ -464,6 +469,8 @@ bold "─── 23. SYMLINK INTEGRITY ───"
 repo="$(cd /Users/Dev/best-ghostty-config && pwd -P)"
 xdg_config="$HOME/.config/ghostty/config"
 xdg_launcher="$HOME/.config/ghostty/ghostty-tmux.sh"
+xdg_tmux_aliases="$HOME/.config/ghostty/tmux-aliases.zsh"
+xdg_legacy_aliases="$HOME/.config/ghostty/dmux-aliases.zsh"
 tmux_conf="$HOME/.tmux.conf"
 
 if [[ -L "$xdg_config" ]]; then
@@ -478,6 +485,16 @@ if [[ -L "$xdg_launcher" ]]; then
     check "symlink: launcher → repo" "$repo/ghostty-tmux.sh" "$target"
 else
     check "symlink: launcher exists" "symlink" "missing"
+fi
+
+if [[ -L "$xdg_tmux_aliases" ]]; then
+    target=$(readlink "$xdg_tmux_aliases")
+    check "symlink: tmux aliases → repo" "$repo/tmux-aliases.zsh" "$target"
+elif [[ -L "$xdg_legacy_aliases" ]]; then
+    target=$(readlink "$xdg_legacy_aliases")
+    check "symlink: legacy aliases → repo" "$repo/dmux-aliases.zsh" "$target"
+else
+    check "symlink: tmux aliases exists" "symlink" "missing (run ./install.sh)"
 fi
 
 if [[ -L "$tmux_conf" ]]; then
@@ -534,7 +551,7 @@ wipe
 r1=$(run); r2=$(run); r3=$(run)
 # Wait for stale
 sleep 4
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 # Single launch — pending resets to 1, but client_count=0 in NO_ATTACH
 # So it attaches to main (base). This is correct: a fresh single-tab launch
 # after sessions are running reuses the base.
@@ -577,7 +594,7 @@ dim "  Cold launch: ${cold_ms}ms"
 check "cold launch < 2000ms" "yes" "$( [[ "$cold_ms" != "N/A" && "$cold_ms" -lt 2000 ]] && echo yes || echo no)"
 
 # Warm sequential launch (session exists)
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 t_start=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
 run >/dev/null
 t_end=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
