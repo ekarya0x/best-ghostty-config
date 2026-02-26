@@ -35,6 +35,7 @@ fi
 # ---------------------------------------------------------------------------
 readonly LOCK_DIR="/tmp/ghostty-tmux.lock"
 readonly PENDING_FILE="/tmp/ghostty-tmux-pending"
+readonly CLAIMED_FILE="/tmp/ghostty-tmux-claimed"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 
@@ -154,6 +155,39 @@ file_age_seconds() {
     echo $(( now - mtime ))
 }
 
+# ---------------------------------------------------------------------------
+# Reattachment helper — find existing unattached sessions from a prior launch
+# ---------------------------------------------------------------------------
+# When Ghostty restores tabs after a restart, the old tmux sessions (main-2,
+# main-3, ...) are still alive but detached.  Instead of creating brand-new
+# sessions that orphan the old ones, we pick the lowest-numbered unattached
+# session that hasn't already been claimed in this launch batch.
+find_unattached_session() {
+    local claimed=""
+    if [[ -f "$CLAIMED_FILE" ]]; then
+        claimed="$(cat "$CLAIMED_FILE")"
+    fi
+
+    local best="" best_num=999999
+    while IFS=' ' read -r name attached; do
+        if [[ "$attached" == "0" && "$name" =~ ^${BASE_SESSION}-([0-9]+)$ ]]; then
+            local num="${BASH_REMATCH[1]}"
+            if ! printf '%s\n' "$claimed" | grep -qxF "$name"; then
+                if (( num < best_num )); then
+                    best="$name"
+                    best_num="$num"
+                fi
+            fi
+        fi
+    done < <(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)
+
+    if [[ -n "$best" ]]; then
+        printf '%s\n' "$best"
+        return 0
+    fi
+    return 1
+}
+
 # If this shell was launched from inside tmux, remove TMUX to avoid nested
 # client warnings when creating/attaching sessions.
 unset TMUX || true
@@ -168,6 +202,7 @@ if [[ -f "$PENDING_FILE" ]]; then
     local_age="$(file_age_seconds "$PENDING_FILE")"
     if (( local_age > PENDING_STALE_SECONDS )); then
         rm -f "$PENDING_FILE"
+        rm -f "$CLAIMED_FILE"
     fi
 fi
 
@@ -190,18 +225,36 @@ if [[ "$FORCE_NEW_SESSION" == "1" ]]; then
     attach_or_print "$next_session"
 fi
 
-# 3. Determine whether to reuse the base session or create a new one.
+# 3. Determine whether to reuse an existing session or create a new one.
 #    - pending == 1 means we are the FIRST instance in this launch batch.
 #      If no clients are attached yet, reuse the base session (fresh Ghostty
 #      launch or Cmd+Q → reopen).
 #    - pending > 1 means another instance already claimed the base session
-#      (even if it hasn't finished exec-ing yet). Always create a new session.
+#      (even if it hasn't finished exec-ing yet). Try to reattach to an
+#      existing unattached session first so that Ghostty-restart correctly
+#      reconnects tabs 2+ to their previous tmux sessions instead of
+#      orphaning them.
 client_count="$(tmux_exec list-clients -F '#{client_pid}' 2>/dev/null | wc -l | tr -d '[:space:]' || echo "0")"
 
 if (( pending == 1 && client_count == 0 )); then
+    echo "$BASE_SESSION" >> "$CLAIMED_FILE"
     attach_or_print "$BASE_SESSION"
 fi
 
-# At least one client attached or another instance already claimed base.
+# In a batch restore (pending > 1), try to reattach to existing detached
+# sessions that match the BASE_SESSION-N naming pattern before creating
+# new ones.  The claimed-sessions file prevents the race where two
+# instances both see the same session as unattached (lock is released
+# before exec completes the attach).
+if (( pending > 1 )); then
+    unattached="$(find_unattached_session || true)"
+    if [[ -n "$unattached" ]]; then
+        echo "$unattached" >> "$CLAIMED_FILE"
+        attach_or_print "$unattached"
+    fi
+fi
+
+# Either this is a single-tab open (Cmd+T, pending == 1, client_count > 0)
+# or no unattached sessions remain — create a brand-new session.
 next_session="$(create_next_session)"
 attach_or_print "$next_session"
