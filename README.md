@@ -84,6 +84,8 @@ cd ~/.ghostty-config && chmod +x install.sh && ./install.sh
 
 The installer handles tmux installation, config symlinking with timestamped backups, launcher wiring, the macOS Ctrl+Space conflict, JetBrains Mono detection, and live tmux reload.
 
+It does **not** rewrite tracked files in this repo. The Ghostty `command` line stays canonical (`~/.config/ghostty/ghostty-tmux.sh`), and the installer ensures the launcher exists at that path (plus `$XDG_CONFIG_HOME/ghostty/ghostty-tmux.sh` when different).
+
 | Source | Target |
 |---|---|
 | `config` | `~/.config/ghostty/config` |

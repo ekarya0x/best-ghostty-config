@@ -3,8 +3,10 @@ set -euo pipefail
 
 readonly REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly XDG_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty"
+readonly DEFAULT_XDG_CONFIG="$HOME/.config/ghostty"
 readonly MACOS_CONFIG="$HOME/Library/Application Support/com.mitchellh.ghostty"
 readonly XDG_LAUNCHER="${XDG_CONFIG}/ghostty-tmux.sh"
+readonly DEFAULT_XDG_LAUNCHER="${DEFAULT_XDG_CONFIG}/ghostty-tmux.sh"
 
 log_info() { echo -e "\033[1;34m[INFO]\033[0m $1"; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
@@ -106,36 +108,46 @@ disable_macos_ctrl_space() {
     /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:60:enabled bool false" "$plist" &>/dev/null
 }
 
-# --- Launcher patching ---
+# --- Launcher wiring ---
 
-patch_launcher_command() {
+prepare_launcher_script() {
     local launcher_file="$REPO_DIR/ghostty-tmux.sh"
     [[ -f "$launcher_file" ]] || log_error "Launcher missing: $launcher_file"
     chmod +x "$launcher_file"
+}
 
-    local escaped_launcher="$XDG_LAUNCHER"
-    escaped_launcher="${escaped_launcher//&/\\&}"
-    escaped_launcher="${escaped_launcher// /\\ }"
+validate_launcher_command_line() {
     local config_file="$REPO_DIR/config"
+    local expected="command = ~/.config/ghostty/ghostty-tmux.sh"
     local current
     current="$(grep '^command = ' "$config_file" || true)"
 
-    local expected="command = ${escaped_launcher}"
     if [[ "$current" == "$expected" ]]; then
-        log_success "Ghostty command already points to launcher."
+        log_success "Ghostty command line is canonical."
         return 0
     fi
 
     if [[ -z "$current" ]]; then
-        log_info "No 'command' line in config. Appending launcher command."
-        echo "$expected" >> "$config_file"
-    else
-        log_info "Patching Ghostty command to launcher."
-        # Use a delimiter that cannot appear in filesystem paths.
-        sed -i.tmp "s#^command = .*#$expected#" "$config_file"
-        rm -f "${config_file}.tmp"
+        log_warn "Repo config is missing a command line: $config_file"
+        log_warn "Expected: $expected"
+        return 0
     fi
-    log_success "Config patched: $expected"
+
+    log_warn "Repo config command is non-canonical. Installer will not mutate tracked files."
+    log_warn "Expected: $expected"
+    log_warn "Found:    $current"
+}
+
+link_launcher_paths() {
+    local launcher_source="$REPO_DIR/ghostty-tmux.sh"
+
+    # Keep ~/.config path always valid because repo config uses this canonical path.
+    link_file "$launcher_source" "$DEFAULT_XDG_LAUNCHER" "Ghostty tmux launcher (~/.config)"
+
+    # Also link to custom XDG path when configured.
+    if [[ "$XDG_LAUNCHER" != "$DEFAULT_XDG_LAUNCHER" ]]; then
+        link_file "$launcher_source" "$XDG_LAUNCHER" "Ghostty tmux launcher (XDG)"
+    fi
 }
 
 # --- Symlink management ---
@@ -208,11 +220,12 @@ main() {
     check_tmux
     check_font
     check_macos_ctrl_space
-    patch_launcher_command
+    prepare_launcher_script
+    validate_launcher_command_line
 
     echo ""
     link_file "$REPO_DIR/config" "$XDG_CONFIG/config" "Ghostty (XDG)"
-    link_file "$REPO_DIR/ghostty-tmux.sh" "$XDG_LAUNCHER" "Ghostty tmux launcher"
+    link_launcher_paths
     handle_macos_app_support
     link_file "$REPO_DIR/tmux.conf" "$HOME/.tmux.conf" "tmux"
     reload_tmux_if_running

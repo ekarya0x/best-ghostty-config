@@ -13,7 +13,7 @@ Press prefix, release, then press the action key.
 
 | Key | Action |
 |---|---|
-| `Ctrl+`` ` | Toggle quick terminal (drops from top of screen) |
+| `Ctrl+Backtick (\`)` | Toggle quick terminal (drops from top of screen) |
 
 ### App
 
@@ -155,7 +155,7 @@ ssh host -t tmux attach -t main                      # remote attach
 
 | Key | Action |
 |---|---|
-| `Ctrl+`` ` | Toggle from anywhere on macOS |
+| `Ctrl+Backtick (\`)` | Toggle from anywhere on macOS |
 
 Drops from the top of whichever screen your mouse is on. Auto-hides on click-away. 0.15s animation. Requires Accessibility permissions and Login Items in System Settings.
 
