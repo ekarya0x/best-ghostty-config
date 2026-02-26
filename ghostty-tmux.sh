@@ -44,6 +44,7 @@ readonly MODE_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.mode"
 readonly FILL_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.fill"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
+readonly FILL_STALE_SECONDS=25
 
 resolve_tmux_bin() {
     if [[ -n "${TMUX_BIN:-}" && -x "${TMUX_BIN}" ]]; then
@@ -246,20 +247,21 @@ fill_restore_tabs_if_needed() {
 
     (
         # Let Ghostty finish launching its own restored tabs first.
-        sleep 0.8
-        acquire_lock
-        local missing
-        missing="$(count_unclaimed_unattached_sessions)"
-        release_lock
+        sleep 1.0
+        local iter=0
+        while (( iter < 120 )); do
+            acquire_lock
+            local missing
+            missing="$(count_unclaimed_unattached_sessions)"
+            release_lock
 
-        if [[ -z "$missing" || "$missing" -le 0 ]]; then
-            exit 0
-        fi
+            if [[ -z "$missing" || "$missing" -le 0 ]]; then
+                exit 0
+            fi
 
-        local i
-        for ((i = 0; i < missing; i++)); do
-            open_ghostty_tab || break
-            sleep 0.12
+            open_ghostty_tab || exit 0
+            iter=$((iter + 1))
+            sleep 0.2
         done
     ) >/dev/null 2>&1 &
 }
@@ -304,9 +306,17 @@ find_unattached_session() {
 }
 
 cleanup_stale_batch_files_if_needed() {
+    if [[ -f "$FILL_FILE" ]]; then
+        local fill_age
+        fill_age="$(file_age_seconds "$FILL_FILE")"
+        if (( fill_age > FILL_STALE_SECONDS )); then
+            rm -f "$FILL_FILE"
+        fi
+    fi
+
     # If no batch is active, clear stale metadata from prior launches.
     if [[ ! -f "$PENDING_FILE" ]]; then
-        rm -f "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+        rm -f "$CLAIMED_FILE" "$MODE_FILE"
     fi
 
     # Clean up stale pending counter (e.g., from a previous batch that finished).
@@ -317,7 +327,6 @@ cleanup_stale_batch_files_if_needed() {
             rm -f "$PENDING_FILE"
             rm -f "$CLAIMED_FILE"
             rm -f "$MODE_FILE"
-            rm -f "$FILL_FILE"
         fi
     fi
 }

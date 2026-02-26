@@ -7,17 +7,21 @@
 alias tls='tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}"'
 alias tmain='tgo main'
 
+__tmux_list() {
+    tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}" 2>/dev/null
+}
+
 tgo() {
     local target="$1"
     if [[ -z "$target" ]]; then
         echo "usage: tgo <session>"
-        tls
+        __tmux_list
         return 1
     fi
 
     if ! tmux has-session -t "$target" 2>/dev/null; then
         echo "session not found: $target"
-        tls
+        __tmux_list
         return 1
     fi
 
@@ -82,9 +86,14 @@ tkill() {
         fi
     fi
 
+    # Convenience: allow `tkill 6` to mean `main-6`.
+    if [[ "$target" =~ '^[0-9]+$' ]]; then
+        target="main-${target}"
+    fi
+
     if ! tmux has-session -t "$target" 2>/dev/null; then
         echo "session not found: $target"
-        tls
+        __tmux_list
         return 1
     fi
 
