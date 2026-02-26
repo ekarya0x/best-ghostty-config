@@ -108,6 +108,33 @@ disable_macos_ctrl_space() {
     /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:60:enabled bool false" "$plist" &>/dev/null
 }
 
+# --- tmux plugin manager + persistence plugins ---
+
+install_tpm_plugins() {
+    local tpm_dir="$HOME/.tmux/plugins/tpm"
+
+    if [[ -d "$tpm_dir/.git" ]]; then
+        log_success "TPM (Tmux Plugin Manager) found."
+    else
+        log_info "Installing TPM (Tmux Plugin Manager)..."
+        if git clone --depth 1 https://github.com/tmux-plugins/tpm "$tpm_dir" 2>/dev/null; then
+            log_success "TPM installed."
+        else
+            log_warn "Failed to clone TPM. Session persistence across reboots won't be available."
+            log_info "Install manually: git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm"
+            return 0
+        fi
+    fi
+
+    # Install/update plugins declared in tmux.conf (resurrect + continuum).
+    log_info "Installing tmux persistence plugins (resurrect + continuum)..."
+    if "$tpm_dir/bin/install_plugins" 2>/dev/null; then
+        log_success "tmux plugins installed — session persistence across reboots enabled."
+    else
+        log_warn "Plugin auto-install failed. Start tmux and press prefix + I to install manually."
+    fi
+}
+
 # --- Launcher wiring ---
 
 prepare_launcher_script() {
@@ -220,6 +247,7 @@ main() {
     check_tmux
     check_font
     check_macos_ctrl_space
+    install_tpm_plugins
     prepare_launcher_script
     validate_launcher_command_line
 

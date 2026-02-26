@@ -188,6 +188,57 @@ find_unattached_session() {
     return 1
 }
 
+# ---------------------------------------------------------------------------
+# Resurrect restore — recover sessions after a system reboot
+# ---------------------------------------------------------------------------
+# When the tmux server died (reboot, kill-server) but tmux-resurrect has a
+# saved snapshot, we restore it synchronously so the session-selection logic
+# below sees the recovered sessions and can reattach tabs to them.
+resurrect_restore_if_needed() {
+    local restore_script="${HOME}/.tmux/plugins/tmux-resurrect/scripts/restore.sh"
+
+    # Resurrect may store saves in XDG_DATA_HOME or the legacy ~/.tmux path.
+    local save_link=""
+    local candidate
+    for candidate in \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/tmux/resurrect/last" \
+        "${HOME}/.tmux/resurrect/last"; do
+        if [[ -L "$candidate" || -f "$candidate" ]]; then
+            save_link="$candidate"
+            break
+        fi
+    done
+
+    # Only attempt if resurrect is installed and has save data.
+    [[ -x "$restore_script" ]] || return 0
+    [[ -n "$save_link" ]] || return 0
+
+    # Only restore when the server has no sessions (fresh start after reboot).
+    if tmux_exec list-sessions 2>/dev/null | grep -q .; then
+        return 0
+    fi
+
+    # Start a temporary session to bootstrap the tmux server so the
+    # restore script has a running server to talk to.
+    tmux_exec new-session -d -s "_bgc_restore" -c "$HOME" 2>/dev/null || return 0
+
+    # Run the restore script (it creates sessions/windows/panes from the
+    # save file using normal tmux commands).
+    TMUX="" "$restore_script" 2>/dev/null || true
+
+    # Give tmux a moment to finish processing restore commands.
+    sleep 1
+
+    # Clean up the bootstrap session if real sessions were restored.
+    if tmux_exec has-session -t "$BASE_SESSION" 2>/dev/null; then
+        tmux_exec kill-session -t "_bgc_restore" 2>/dev/null || true
+    else
+        # Restore didn't recreate the base session (save was incomplete or
+        # empty).  Rename the bootstrap so the rest of the script can use it.
+        tmux_exec rename-session -t "_bgc_restore" "$BASE_SESSION" 2>/dev/null || true
+    fi
+}
+
 # If this shell was launched from inside tmux, remove TMUX to avoid nested
 # client warnings when creating/attaching sessions.
 unset TMUX || true
@@ -210,6 +261,10 @@ fi
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
 pending=$((pending + 1))
 echo "$pending" > "$PENDING_FILE"
+
+# 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
+#    saved snapshot, restore it now before making any session decisions.
+resurrect_restore_if_needed
 
 # 1. No tmux server or no base session → create base session detached, then
 #    attach. The session exists before any other instance can run, preventing
