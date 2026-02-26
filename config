@@ -1,8 +1,26 @@
 # ==============================================================================
-# Ghostty Configuration
+# Ghostty Configuration — best-ghostty-config
+# ==============================================================================
+#
+# QUICK REFERENCE
+#
+#   Ctrl+`              Quick terminal (global — works from any app)
+#   Cmd+T               New tab             Cmd+W            Close pane
+#   Cmd+Shift+W         Close tab           Cmd+1–9          Jump to tab
+#   Cmd+Shift+←/→       Switch tabs         Cmd+Ctrl+Shift+←/→  Move tab
+#   Cmd+D               Split right         Cmd+Shift+D      Split down
+#   Cmd+Alt+Arrow       Focus split         Cmd+Ctrl+Arrow   Resize split
+#   Cmd+Shift+E         Equalize splits     Cmd+Shift+F      Zoom split
+#   Cmd+Shift+P         Command palette     Cmd+Shift+,      Reload config
+#   Cmd+Shift+S         Secure input        Cmd+Shift+I      Inspector
+#   Cmd+= / - / 0      Font size            Ctrl+Cmd+F       Fullscreen
+#
+#   tmux prefix: Ctrl+Space (fallback: Ctrl+A)
+#   Full tmux cheat sheet: see tmux.conf or docs/cheatsheet/keybindings.md
+#
 # ==============================================================================
 
-# Typography
+# --- Typography ---
 font-family = JetBrains Mono
 font-size = 15
 font-thicken = true
@@ -10,11 +28,12 @@ adjust-cell-height = 2
 font-feature = calt
 font-feature = liga
 
-# Theme & Colors
+# --- Theme ---
+# Auto-switches with macOS system appearance
 theme = light:Catppuccin Latte,dark:Catppuccin Mocha
 window-theme = auto
 
-# Window & Appearance
+# --- Window ---
 background-opacity = 0.8
 background-blur = 20
 macos-titlebar-style = tabs
@@ -28,69 +47,66 @@ window-save-state = always
 window-inherit-working-directory = true
 confirm-close-surface = false
 
-# Cursor
+# --- Cursor ---
 cursor-style = bar
 cursor-style-blink = true
 cursor-opacity = 0.9
 cursor-color = cell-foreground
 
-# Splits
+# --- Splits ---
 unfocused-split-opacity = 0.85
 
-# Quick Terminal (Global Dropdown)
-# Note: Requires macOS Accessibility permissions and Login Items.
+# --- Quick Terminal ---
+# Ctrl+` from anywhere on macOS. Requires Accessibility + Login Items.
 quick-terminal-position = top
 quick-terminal-screen = mouse
 quick-terminal-autohide = true
 quick-terminal-animation-duration = 0.15
 
-# Mouse Behavior
+# --- Mouse ---
 mouse-hide-while-typing = true
 copy-on-select = clipboard
 link-url = true
 mouse-scroll-multiplier = 2
 
-# Shell Integration
+# --- Shell Integration ---
 shell-integration = detect
 shell-integration-features = no-cursor,sudo,title,ssh-env,ssh-terminfo
 
-# Security & Clipboard
+# --- Clipboard ---
 clipboard-paste-protection = true
 clipboard-paste-bracketed-safe = true
 clipboard-read = allow
 clipboard-write = allow
 clipboard-trim-trailing-spaces = true
 
-# macOS Specific
+# --- macOS ---
 macos-option-as-alt = left
 macos-window-shadow = true
 
-# tmux Auto-Launch
-# REQUIRES: tmux installed (brew install tmux)
-# Uses an explicit launcher script so each new Ghostty tab gets an
-# independent tmux session instead of attaching to a singleton.
-# install.sh standardizes this path and symlinks the launcher for you.
+# --- tmux ---
+# Each Ghostty tab gets its own tmux session (main, main-2, main-3, ...).
 # To use Ghostty without tmux, comment out the line below.
 command = ~/.config/ghostty/ghostty-tmux.sh
 
-# Performance & Scrollback
+# --- Scrollback ---
 scrollback-limit = 25000000
-# Ghostty 1.3.0+ (Mid-March 2026)
-# scrollbar-style = system
 
 # ==============================================================================
 # Keybindings
 # ==============================================================================
 
-# Global / App
+# Global
 keybind = global:ctrl+grave_accent=toggle_quick_terminal
+
+# App
 keybind = cmd+shift+p=toggle_command_palette
 keybind = ctrl+cmd+f=toggle_fullscreen
 keybind = cmd+shift+comma=reload_config
 keybind = cmd+shift+s=toggle_secure_input
 keybind = cmd+shift+i=inspector:toggle
 
-# Tabs
+# Tabs  —  Cmd+T new | Cmd+W close pane | Cmd+Shift+W close tab
 keybind = cmd+t=new_tab
 keybind = cmd+w=close_surface
 keybind = cmd+shift+w=close_tab
@@ -108,7 +124,7 @@ keybind = cmd+9=goto_tab:9
 keybind = cmd+ctrl+shift+left=move_tab:-1
 keybind = cmd+ctrl+shift+right=move_tab:1
 
-# Splits
+# Splits  —  Cmd+D right | Cmd+Shift+D down | Cmd+Alt+Arrow navigate | Cmd+Ctrl+Arrow resize
 keybind = cmd+d=new_split:right
 keybind = cmd+shift+d=new_split:down
 keybind = cmd+alt+left=goto_split:left
@@ -122,7 +138,7 @@ keybind = cmd+ctrl+down=resize_split:down,10
 keybind = cmd+shift+e=equalize_splits
 keybind = cmd+shift+f=toggle_split_zoom
 
-# Font Size
+# Font  —  Cmd+= bigger | Cmd+- smaller | Cmd+0 reset
 keybind = cmd+equal=increase_font_size:1
 keybind = cmd+minus=decrease_font_size:1
 keybind = cmd+0=reset_font_size
