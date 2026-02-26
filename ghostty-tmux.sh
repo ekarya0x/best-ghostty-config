@@ -13,6 +13,10 @@ readonly BASE_SESSION
 readonly SOCKET_NAME="${GHOSTTY_TMUX_SOCKET_NAME:-}"
 readonly NO_ATTACH="${GHOSTTY_TMUX_NO_ATTACH:-0}"
 readonly FORCE_NEW_SESSION="${GHOSTTY_TMUX_FORCE_NEW_SESSION:-0}"
+readonly STATE_DIR="${GHOSTTY_TMUX_STATE_DIR:-/tmp}"
+STATE_KEY="${GHOSTTY_TMUX_STATE_KEY:-$(id -u)-${SOCKET_NAME:-default}-${BASE_SESSION}}"
+STATE_KEY="$(printf '%s' "$STATE_KEY" | tr -c 'A-Za-z0-9._-' '_')"
+readonly STATE_KEY
 START_DIR="${PWD:-$HOME}"
 if [[ ! -d "$START_DIR" ]]; then
     START_DIR="$HOME"
@@ -33,9 +37,10 @@ fi
 # staleness window (PENDING_STALE_SECONDS) so normal single-tab opens later
 # in the day are unaffected.
 # ---------------------------------------------------------------------------
-readonly LOCK_DIR="/tmp/ghostty-tmux.lock"
-readonly PENDING_FILE="/tmp/ghostty-tmux-pending"
-readonly CLAIMED_FILE="/tmp/ghostty-tmux-claimed"
+readonly LOCK_DIR="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.lock"
+readonly PENDING_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.pending"
+readonly CLAIMED_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.claimed"
+readonly MODE_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.mode"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 
@@ -67,6 +72,8 @@ if [[ -z "$TMUX_BIN" ]]; then
     exit 127
 fi
 
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
 tmux_exec() {
     if [[ -n "$SOCKET_NAME" ]]; then
         "$TMUX_BIN" -L "$SOCKET_NAME" "$@"
@@ -80,6 +87,14 @@ exec_tmux() {
         exec "$TMUX_BIN" -L "$SOCKET_NAME" "$@"
     fi
     exec "$TMUX_BIN" "$@"
+}
+
+tmux_client_count() {
+    tmux_exec list-clients -F '#{client_pid}' 2>/dev/null | wc -l | tr -d '[:space:]' || echo "0"
+}
+
+tmux_session_count() {
+    tmux_exec list-sessions -F '#{session_name}' 2>/dev/null | wc -l | tr -d '[:space:]' || echo "0"
 }
 
 # ---------------------------------------------------------------------------
@@ -153,6 +168,29 @@ file_age_seconds() {
         mtime=$(stat -c%Y "$file" 2>/dev/null || echo "$now")
     fi
     echo $(( now - mtime ))
+}
+
+BATCH_MODE=""
+set_batch_mode_if_needed() {
+    if [[ -f "$MODE_FILE" ]]; then
+        BATCH_MODE="$(cat "$MODE_FILE" 2>/dev/null || true)"
+    fi
+
+    if [[ "$BATCH_MODE" == "restore" || "$BATCH_MODE" == "normal" ]]; then
+        return 0
+    fi
+
+    local session_count client_count
+    session_count="$(tmux_session_count)"
+    client_count="$(tmux_client_count)"
+
+    if (( session_count > 0 && client_count == 0 )); then
+        BATCH_MODE="restore"
+    else
+        BATCH_MODE="normal"
+    fi
+
+    printf '%s\n' "$BATCH_MODE" > "$MODE_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -248,12 +286,18 @@ unset TMUX || true
 # ---------------------------------------------------------------------------
 acquire_lock
 
+# If no batch is active, clear stale metadata from prior launches.
+if [[ ! -f "$PENDING_FILE" ]]; then
+    rm -f "$CLAIMED_FILE" "$MODE_FILE"
+fi
+
 # Clean up stale pending counter (e.g., from a previous batch that finished).
 if [[ -f "$PENDING_FILE" ]]; then
     local_age="$(file_age_seconds "$PENDING_FILE")"
     if (( local_age > PENDING_STALE_SECONDS )); then
         rm -f "$PENDING_FILE"
         rm -f "$CLAIMED_FILE"
+        rm -f "$MODE_FILE"
     fi
 fi
 
@@ -265,6 +309,11 @@ echo "$pending" > "$PENDING_FILE"
 # 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
 #    saved snapshot, restore it now before making any session decisions.
 resurrect_restore_if_needed
+
+# Persist batch mode once per launch burst:
+#   - restore: Ghostty relaunch with detached surviving sessions
+#   - normal:  regular interactive tab/pane creation
+set_batch_mode_if_needed
 
 # 1. No tmux server or no base session → create base session detached, then
 #    attach. The session exists before any other instance can run, preventing
@@ -289,19 +338,17 @@ fi
 #      existing unattached session first so that Ghostty-restart correctly
 #      reconnects tabs 2+ to their previous tmux sessions instead of
 #      orphaning them.
-client_count="$(tmux_exec list-clients -F '#{client_pid}' 2>/dev/null | wc -l | tr -d '[:space:]' || echo "0")"
+client_count="$(tmux_client_count)"
 
 if (( pending == 1 && client_count == 0 )); then
     echo "$BASE_SESSION" >> "$CLAIMED_FILE"
     attach_or_print "$BASE_SESSION"
 fi
 
-# In a batch restore (pending > 1), try to reattach to existing detached
-# sessions that match the BASE_SESSION-N naming pattern before creating
-# new ones.  The claimed-sessions file prevents the race where two
-# instances both see the same session as unattached (lock is released
-# before exec completes the attach).
-if (( pending > 1 )); then
+# In restore mode (Ghostty relaunch), reattach tabs 2+ to existing detached
+# BASE_SESSION-N sessions before creating anything new. In normal mode (live
+# usage), always create a fresh session for each new tab/pane/window.
+if [[ "$BATCH_MODE" == "restore" && "$pending" -gt 1 ]]; then
     unattached="$(find_unattached_session || true)"
     if [[ -n "$unattached" ]]; then
         echo "$unattached" >> "$CLAIMED_FILE"

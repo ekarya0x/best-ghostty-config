@@ -8,6 +8,11 @@
 PASS=0; FAIL=0; TOTAL=0
 SCRIPT="/Users/Dev/best-ghostty-config/ghostty-tmux.sh"
 SOCKET="bgctest$$"
+STATE_KEY="bgctest-state-${SOCKET}"
+LOCK_DIR="/tmp/ghostty-tmux-${STATE_KEY}.lock"
+PENDING_FILE="/tmp/ghostty-tmux-${STATE_KEY}.pending"
+CLAIMED_FILE="/tmp/ghostty-tmux-${STATE_KEY}.claimed"
+MODE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.mode"
 
 green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[1;31m%s\033[0m\n' "$1"; }
@@ -41,7 +46,7 @@ check_ok() {
 
 wipe() {
     tmux -L "$SOCKET" kill-server 2>/dev/null || true
-    rm -rf /tmp/ghostty-tmux.lock /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+    rm -rf "$LOCK_DIR" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 }
 
 trap 'wipe' EXIT
@@ -49,6 +54,7 @@ trap 'wipe' EXIT
 # Helper: run the launcher in NO_ATTACH mode on the isolated socket
 run() {
     GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" \
+    GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" \
     GHOSTTY_TMUX_NO_ATTACH=1 \
     "$@" \
     "$SCRIPT" 2>/dev/null
@@ -141,7 +147,7 @@ bold ""
 bold "─── 5. GHOSTTY RESTART (reattach to surviving sessions) ───"
 # ============================================================================
 # Sessions survive from test 4. Clear batch state to simulate fresh launch.
-rm -f /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "reattach: tab 1 → main" "main" "$r1"
 check "reattach: tab 2 → main-2" "main-2" "$r2"
@@ -153,7 +159,7 @@ check "reattach: no orphans (still 4)" "4" "$(sess_count)"
 bold ""
 bold "─── 6. DOUBLE RESTART (reattach twice in a row) ───"
 # ============================================================================
-rm -f /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "2nd reattach: tab 1 → main" "main" "$r1"
 check "2nd reattach: tab 2 → main-2" "main-2" "$r2"
@@ -205,7 +211,7 @@ check "gaps: tab 1 → main" "main" "$r1"
 check "gaps: tab 2 → main-3 (lowest unattached)" "main-3" "$r2"
 check "gaps: tab 3 → main-7 (next lowest)" "main-7" "$r3"
 # A 4th tab should create a new session, filling gap at main-2
-rm -f /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 # Need to re-enter batch mode — start a fresh batch with existing 3 sessions
 wipe
 tmux -L "$SOCKET" new-session -d -s main
@@ -221,7 +227,7 @@ bold "─── 10. FORCE_NEW_SESSION ENV VAR ───"
 wipe
 run >/dev/null  # create base
 sleep 4
-rm -f /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
 check "force new: creates main-2" "main-2" "$r"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
@@ -232,11 +238,11 @@ bold ""
 bold "─── 11. STALE LOCK RECOVERY ───"
 # ============================================================================
 wipe
-mkdir -p /tmp/ghostty-tmux.lock
-touch -t 202501010000 /tmp/ghostty-tmux.lock 2>/dev/null || true
+mkdir -p "$LOCK_DIR"
+touch -t 202501010000 "$LOCK_DIR" 2>/dev/null || true
 r=$(run)
 check "stale lock: recovers → main" "main" "$r"
-check_ok "stale lock: lock dir removed" test ! -d /tmp/ghostty-tmux.lock
+check_ok "stale lock: lock dir removed" test ! -d "$LOCK_DIR"
 
 # ============================================================================
 bold ""
@@ -244,14 +250,14 @@ bold "─── 12. STALE PENDING + CLAIMED CLEANUP ───"
 # ============================================================================
 wipe
 # Create pending and claimed files, then make them stale
-echo "5" > /tmp/ghostty-tmux-pending
-echo "main" > /tmp/ghostty-tmux-claimed
-echo "main-2" >> /tmp/ghostty-tmux-claimed
-touch -t 202501010000 /tmp/ghostty-tmux-pending 2>/dev/null || true
+echo "5" > "$PENDING_FILE"
+echo "main" > "$CLAIMED_FILE"
+echo "main-2" >> "$CLAIMED_FILE"
+touch -t 202501010000 "$PENDING_FILE" 2>/dev/null || true
 r=$(run)
 check "stale batch: resets → main" "main" "$r"
 # After stale cleanup, pending should be 1 (this instance)
-pending_val=$(cat /tmp/ghostty-tmux-pending 2>/dev/null)
+pending_val=$(cat "$PENDING_FILE" 2>/dev/null)
 check "stale batch: pending reset to 1" "1" "$pending_val"
 
 # ============================================================================
@@ -263,13 +269,13 @@ tmux -L "$SOCKET" new-session -d -s main
 tmux -L "$SOCKET" new-session -d -s main-2
 tmux -L "$SOCKET" new-session -d -s main-3
 r1=$(run); r2=$(run); r3=$(run)
-claimed=$(sort /tmp/ghostty-tmux-claimed 2>/dev/null)
+claimed=$(sort "$CLAIMED_FILE" 2>/dev/null)
 expected=$(printf 'main\nmain-2\nmain-3')
 check "claimed: tracks all 3" "$expected" "$claimed"
 
 # New session creation also tracked
 r4=$(run)
-claimed_last=$(tail -1 /tmp/ghostty-tmux-claimed 2>/dev/null)
+claimed_last=$(tail -1 "$CLAIMED_FILE" 2>/dev/null)
 check "claimed: new session '$r4' also tracked" "$r4" "$claimed_last"
 
 # ============================================================================
@@ -487,13 +493,13 @@ bold "─── 24. PENDING COUNTER MONOTONIC INCREMENT ───"
 # ============================================================================
 wipe
 run >/dev/null
-p1=$(cat /tmp/ghostty-tmux-pending 2>/dev/null)
+p1=$(cat "$PENDING_FILE" 2>/dev/null)
 check "pending after 1 launch" "1" "$p1"
 run >/dev/null
-p2=$(cat /tmp/ghostty-tmux-pending 2>/dev/null)
+p2=$(cat "$PENDING_FILE" 2>/dev/null)
 check "pending after 2 launches" "2" "$p2"
 run >/dev/null
-p3=$(cat /tmp/ghostty-tmux-pending 2>/dev/null)
+p3=$(cat "$PENDING_FILE" 2>/dev/null)
 check "pending after 3 launches" "3" "$p3"
 
 # ============================================================================
@@ -502,7 +508,7 @@ bold "─── 25. LOCK FILE CLEANUP ───"
 # ============================================================================
 wipe
 run >/dev/null
-check "lock released after run" "no" "$( [[ -d /tmp/ghostty-tmux.lock ]] && echo yes || echo no)"
+check "lock released after run" "no" "$( [[ -d "$LOCK_DIR" ]] && echo yes || echo no)"
 
 # ============================================================================
 bold ""
@@ -528,7 +534,7 @@ wipe
 r1=$(run); r2=$(run); r3=$(run)
 # Wait for stale
 sleep 4
-rm -f /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 # Single launch — pending resets to 1, but client_count=0 in NO_ATTACH
 # So it attaches to main (base). This is correct: a fresh single-tab launch
 # after sessions are running reuses the base.
@@ -571,7 +577,7 @@ dim "  Cold launch: ${cold_ms}ms"
 check "cold launch < 2000ms" "yes" "$( [[ "$cold_ms" != "N/A" && "$cold_ms" -lt 2000 ]] && echo yes || echo no)"
 
 # Warm sequential launch (session exists)
-rm -f /tmp/ghostty-tmux-pending /tmp/ghostty-tmux-claimed
+rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
 t_start=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
 run >/dev/null
 t_end=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
@@ -597,7 +603,7 @@ wipe
 # Launch 10 instances truly in parallel via background jobs
 pids=()
 for i in $(seq 1 10); do
-    GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_NO_ATTACH=1 "$SCRIPT" > "/tmp/bgc_par_$i" 2>/dev/null &
+    GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 "$SCRIPT" > "/tmp/bgc_par_$i" 2>/dev/null &
     pids+=($!)
 done
 # Wait for all to complete

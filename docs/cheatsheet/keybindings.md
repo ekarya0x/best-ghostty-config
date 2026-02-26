@@ -147,6 +147,17 @@ tmux ls -F '#{session_name} attached=#{session_attached}'   # attachment status
 ssh host -t tmux attach -t main                      # remote attach
 ```
 
+### dmux aliases
+
+```bash
+dls                 # compact list (session + attached + windows)
+dgo main-2          # jump/attach
+dprev               # switch to most recently used other session
+dkill main-2        # kill target session safely
+dkillc              # kill current session and jump to another
+dprune              # kill detached main-* sessions
+```
+
 ---
 
 ## Mouse

@@ -23,7 +23,7 @@ Ghostty + tmux. Persistent sessions, independent tabs, Catppuccin theme, sane de
 └───────────────────────────────────────────────────────────┘
 ```
 
-Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking — even when Ghostty restores five tabs simultaneously, each lands on a separate session.
+Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking and batch modes: restart restores reattach existing detached sessions, while normal interactive tab/pane/window creation always gets fresh sessions.
 
 ## Three layers of persistence
 
@@ -52,6 +52,7 @@ The installer:
 - Installs tmux via Homebrew if missing
 - Installs TPM + tmux-resurrect + tmux-continuum
 - Symlinks config files with timestamped backups
+- Installs dmux aliases (`dls`, `dgo`, `dprev`, `dkill`, `dprune`)
 - Fixes the macOS Ctrl+Space input source conflict
 - Checks for JetBrains Mono
 - Reloads tmux if running
@@ -63,6 +64,7 @@ The installer:
 | `config` | `~/.config/ghostty/config` |
 | `config` | `~/Library/Application Support/com.mitchellh.ghostty/config` |
 | `ghostty-tmux.sh` | `~/.config/ghostty/ghostty-tmux.sh` |
+| `dmux-aliases.zsh` | `~/.config/ghostty/dmux-aliases.zsh` |
 | `tmux.conf` | `~/.tmux.conf` |
 
 ### Update
@@ -108,16 +110,17 @@ Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.m
 
 `ghostty-tmux.sh` runs once per Ghostty tab. It decides which tmux session to connect to.
 
-**Concurrency control.** Ghostty restores all tabs at once. Without serialization, every tab would race and attach to the same session. The launcher uses `mkdir` as an atomic lock (POSIX-guaranteed atomic) and a pending-instance counter to serialize.
+**Concurrency control.** Ghostty restores all tabs at once. Without serialization, every tab would race and attach to the same session. The launcher uses `mkdir` as an atomic lock (POSIX-guaranteed atomic) plus pending/claimed counters. State files are namespaced by uid + socket + base session so parallel sockets and tests cannot collide.
 
 **Session selection logic:**
 
 1. **Resurrect check.** If the tmux server is empty and a resurrect snapshot exists, restore it first. This handles reboots.
 2. **Base session.** If session `main` doesn't exist, create it and attach.
 3. **Force new.** If `GHOSTTY_TMUX_FORCE_NEW_SESSION=1`, always create a new session.
-4. **First in batch.** If this is the first instance (`pending=1`) and no clients are attached, reuse `main`.
-5. **Reattach.** If in a batch (`pending>1`), find the lowest-numbered unattached session (`main-2`, `main-3`, ...) and reattach to it.
-6. **Create.** If no unattached sessions remain, create the next `main-N`.
+4. **Batch mode.** Classify this launch burst as `restore` (detached sessions exist, no clients attached) or `normal` (live interactive usage).
+5. **First in batch.** If this is the first instance (`pending=1`) and no clients are attached, reuse `main`.
+6. **Restore mode.** If in a restore batch (`pending>1`), reattach to the lowest-numbered unattached session (`main-2`, `main-3`, ...).
+7. **Normal mode / fallback.** Create the next `main-N`.
 
 A **claimed-sessions file** tracks which sessions have been assigned in the current batch. This prevents the race where instance N releases the lock but hasn't finished `exec tmux attach` yet — instance N+1 would see the session as unattached without this guard.
 
@@ -129,6 +132,8 @@ A **claimed-sessions file** tracks which sessions have been assigned in the curr
 | `GHOSTTY_TMUX_SOCKET_NAME` | _(default socket)_ | Named tmux socket (`-L`) |
 | `GHOSTTY_TMUX_NO_ATTACH` | `0` | Print session name instead of attaching |
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
+| `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/pending/claimed/mode files |
+| `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
 | `TMUX_BIN` | _(auto-detected)_ | Explicit tmux binary path |
 
 ## Daily workflows
@@ -147,6 +152,17 @@ tmux attach -t main-2         # reattach manually
 ```bash
 tmux switch-client -t main-2  # from inside tmux
 # or: prefix + s              # interactive session picker
+```
+
+### dmux aliases (installed by `install.sh`)
+
+```bash
+dls                 # compact session list
+dgo main-3          # jump/attach to a session
+dprev               # switch to most recently used other session
+dkill main-3        # kill one session safely
+dkillc              # kill current session and hop to another
+dprune              # kill detached main-* sessions
 ```
 
 ### Named project sessions
