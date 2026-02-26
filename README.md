@@ -47,7 +47,9 @@ This config launches tmux through `~/.config/ghostty/ghostty-tmux.sh`. That laun
 
 **New Ghostty tabs still mirror one tmux session**
 
-If every `Cmd+T` still lands in the same `main` session, your active config is stale and still uses `tmux new-session -A -s main`. Re-run `install.sh`, then verify:
+Previous versions had a race condition: when Ghostty restores saved tabs (`window-save-state = always`), all tabs launch `ghostty-tmux.sh` nearly simultaneously. Every instance checked `has_attached_clients()` before any client finished attaching, saw zero clients, and fell through to the base session — mirroring every tab. The current launcher uses `mkdir`-based atomic locking with a pending-instance counter to serialize concurrent launches. The first instance claims the base session; all others create independent sessions.
+
+If tabs still mirror after updating, re-run `install.sh` and verify:
 
 ```bash
 grep '^command = ' ~/.config/ghostty/config
@@ -203,7 +205,7 @@ Every setting below differs from the stock Ghostty 1.2.3 defaults. Settings left
 
 | Setting | Default | Ours | Why |
 |---|---|---|---|
-| `command` | *(none)* | `~/.config/ghostty/ghostty-tmux.sh` | Uses a launcher script instead of direct `tmux -A` so new Ghostty tabs no longer mirror one singleton session. Behavior: first tab creates/attaches `main`; subsequent tabs create independent sessions (`main-2`, `main-3`, ...). |
+| `command` | *(none)* | `~/.config/ghostty/ghostty-tmux.sh` | Launcher script with `mkdir`-based atomic locking and a pending-instance counter. Prevents the race condition where simultaneous tab restores all attach to the base session. First tab gets `main`; subsequent tabs get independent sessions (`main-2`, `main-3`, ...). |
 
 ### Scrollback
 
