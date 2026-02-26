@@ -13,6 +13,7 @@
 #   Cmd+Shift+E         Equalize splits     Cmd+Shift+F      Zoom split
 #   Cmd+Shift+P         Command palette     Cmd+Shift+,      Reload config
 #   Cmd+Shift+S         Secure input        Cmd+Shift+I      Inspector
+#   Shift+Return        Newline (e.g. Claude Code multiline input)
 #   Cmd+= / - / 0      Font size            Ctrl+Cmd+F       Fullscreen
 #
 #   tmux prefix: Ctrl+Space (fallback: Ctrl+A)
@@ -100,6 +101,7 @@ scrollback-limit = 25000000
 keybind = global:ctrl+grave_accent=toggle_quick_terminal
 
 # App
+keybind = shift+enter=text:\x1b\r
 keybind = cmd+shift+p=toggle_command_palette
 keybind = ctrl+cmd+f=toggle_fullscreen
 keybind = cmd+shift+comma=reload_config
