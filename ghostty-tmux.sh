@@ -311,5 +311,8 @@ fi
 
 # Either this is a single-tab open (Cmd+T, pending == 1, client_count > 0)
 # or no unattached sessions remain — create a brand-new session.
+# Record it in the claimed file so a subsequent instance (whose lock-acquire
+# may win before our exec completes) won't see it as "unattached".
 next_session="$(create_next_session)"
+echo "$next_session" >> "$CLAIMED_FILE"
 attach_or_print "$next_session"
