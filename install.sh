@@ -131,7 +131,8 @@ patch_launcher_command() {
         echo "$expected" >> "$config_file"
     else
         log_info "Patching Ghostty command to launcher."
-        sed -i.tmp "s|^command = .*|$expected|" "$config_file"
+        # Use a delimiter that cannot appear in filesystem paths.
+        sed -i.tmp "s#^command = .*#$expected#" "$config_file"
         rm -f "${config_file}.tmp"
     fi
     log_success "Config patched: $expected"

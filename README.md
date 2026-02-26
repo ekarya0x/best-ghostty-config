@@ -245,7 +245,7 @@ Every setting below differs from stock defaults.
 | `default-terminal` | `screen` | `tmux-256color` | Correct color terminfo |
 | `terminal-overrides` | — | `xterm-ghostty:RGB` | 24-bit true color |
 | `extended-keys` | `off` | `on` | Full modifier reporting |
-| `escape-time` | `500` | `0` | Instant Escape (500ms breaks Vim) |
+| `escape-time` | `500` | `10` | Near-instant Escape, safe over high-latency SSH |
 | `history-limit` | `2000` | `50000` | 50K lines per pane |
 | `base-index` | `0` | `1` | Windows start at 1, matches keyboard |
 | `renumber-windows` | `off` | `on` | No gaps after closing a window |

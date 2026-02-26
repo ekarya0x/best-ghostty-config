@@ -5,7 +5,11 @@ set -euo pipefail
 # Add common Homebrew/system paths so tmux can be found reliably.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
-readonly BASE_SESSION="${GHOSTTY_TMUX_BASE_SESSION:-main}"
+BASE_SESSION="${GHOSTTY_TMUX_BASE_SESSION:-main}"
+# tmux session names cannot contain colons or periods, and spaces cause quoting
+# headaches. Strip them so a bad env var doesn't silently break session creation.
+BASE_SESSION="${BASE_SESSION//[: .]/-}"
+readonly BASE_SESSION
 readonly SOCKET_NAME="${GHOSTTY_TMUX_SOCKET_NAME:-}"
 readonly NO_ATTACH="${GHOSTTY_TMUX_NO_ATTACH:-0}"
 readonly FORCE_NEW_SESSION="${GHOSTTY_TMUX_FORCE_NEW_SESSION:-0}"
