@@ -53,6 +53,7 @@ The installer:
 - Installs TPM + tmux-resurrect + tmux-continuum
 - Symlinks config files with timestamped backups
 - Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`)
+- Installs tmux slash-command REPL (`trepl`)
 - Fixes the macOS Ctrl+Space input source conflict
 - Checks for JetBrains Mono
 - Reloads tmux if running
@@ -65,6 +66,7 @@ The installer:
 | `config` | `~/Library/Application Support/com.mitchellh.ghostty/config` |
 | `ghostty-tmux.sh` | `~/.config/ghostty/ghostty-tmux.sh` |
 | `tmux-aliases.zsh` | `~/.config/ghostty/tmux-aliases.zsh` |
+| `tmux-repl.sh` | `~/.config/ghostty/tmux-repl.sh` |
 | `tmux.conf` | `~/.tmux.conf` |
 
 ### Update
@@ -135,6 +137,8 @@ A **claimed-sessions file** tracks which sessions have been assigned in the curr
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
 | `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/pending/claimed/mode files |
 | `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
+| `GHOSTTY_TMUX_TRACE` | `0` | Enable launcher trace logging |
+| `GHOSTTY_TMUX_TRACE_FILE` | `.../ghostty-tmux-<key>.trace.log` | Custom launcher trace path |
 | `TMUX_BIN` | _(auto-detected)_ | Explicit tmux binary path |
 
 ## Daily workflows
@@ -159,11 +163,30 @@ tmux switch-client -t main-2  # from inside tmux
 
 ```bash
 tls                 # compact session list
+twin                # all tmux windows (across sessions)
+tpanes              # all panes (with cwd + command)
+ttree               # built-in tree chooser (sessions/windows/panes)
 tgo main-3          # jump/attach to a session
+tnew                # create next main-N and attach
 tprev               # switch to most recently used other session
 tkill main-3        # kill one session safely
 tkillc              # kill current session and hop to another
 tprune              # kill detached main-* sessions
+trepl               # interactive slash-command tmux REPL
+```
+
+### tmux REPL (`trepl`)
+
+```bash
+trepl
+# /help
+# /sessions
+# /tree
+# /choose       # requires fzf
+# /doctor
+# /trace on
+# /save
+# /restore
 ```
 
 ### Named project sessions
@@ -339,11 +362,13 @@ tmux show -gv prefix2    # C-a
 ls -la ~/.config/ghostty/config                                         # symlink → repo
 ls -la ~/.config/ghostty/ghostty-tmux.sh                                # symlink → repo
 ls -la ~/.config/ghostty/tmux-aliases.zsh                               # symlink → repo
+ls -la ~/.config/ghostty/tmux-repl.sh                                   # symlink → repo
 ls -la "$HOME/Library/Application Support/com.mitchellh.ghostty/config" # symlink → repo
 ls -la ~/.tmux.conf                                                     # symlink → repo
 ls -la ~/.tmux/plugins/tmux-resurrect/                                  # plugin installed
 ls -la ~/.tmux/plugins/tmux-continuum/                                  # plugin installed
 ls -la ~/.local/share/tmux/resurrect/last                               # save data exists
+GHOSTTY_TMUX_TRACE=1 ~/.config/ghostty/ghostty-tmux.sh >/dev/null       # emit trace logs
 tmux show -gv prefix                                                    # C-Space
 tmux show -gv prefix2                                                   # C-a
 tmux show -gv @resurrect-processes                                      # ~claude
@@ -368,7 +393,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 143 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 155 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -377,9 +402,10 @@ best-ghostty-config/
   config              Ghostty settings + keybindings
   ghostty-tmux.sh     Session launcher — atomic locking, reattachment, resurrect restore
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
+  tmux-repl.sh        Interactive slash-command tmux REPL
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             143-assertion test suite
+  test.sh             155-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

@@ -45,6 +45,8 @@ readonly FILL_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.fill"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 readonly FILL_STALE_SECONDS=25
+readonly TRACE_ENABLED="${GHOSTTY_TMUX_TRACE:-0}"
+readonly TRACE_FILE="${GHOSTTY_TMUX_TRACE_FILE:-${STATE_DIR}/ghostty-tmux-${STATE_KEY}.trace.log}"
 
 resolve_tmux_bin() {
     if [[ -n "${TMUX_BIN:-}" && -x "${TMUX_BIN}" ]]; then
@@ -75,6 +77,14 @@ if [[ -z "$TMUX_BIN" ]]; then
 fi
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+trace_log() {
+    [[ "$TRACE_ENABLED" == "1" ]] || return 0
+    local msg="$1"
+    local ts
+    ts="$(date '+%Y-%m-%dT%H:%M:%S%z')"
+    printf '%s pid=%s key=%s msg=%s\n' "$ts" "$$" "$STATE_KEY" "$msg" >> "$TRACE_FILE" 2>/dev/null || true
+}
 
 tmux_exec() {
     if [[ -n "$SOCKET_NAME" ]]; then
@@ -127,6 +137,7 @@ trap 'release_lock' EXIT
 # ---------------------------------------------------------------------------
 attach_or_print() {
     local session_name="$1"
+    trace_log "select session=${session_name} pending=${pending:-0} mode=${BATCH_MODE:-unknown}"
 
     # Release the lock BEFORE exec replaces this process.
     release_lock
@@ -148,6 +159,7 @@ create_next_session() {
     while (( idx < 10000 )); do
         session_name="${BASE_SESSION}-${idx}"
         if tmux_exec new-session -d -s "$session_name" -c "$START_DIR" 2>/dev/null; then
+            trace_log "create session=${session_name} path=${START_DIR}"
             printf '%s\n' "$session_name"
             return 0
         fi
@@ -157,6 +169,7 @@ create_next_session() {
     # Extremely unlikely fallback if sequence is exhausted.
     session_name="${BASE_SESSION}-$(date +%Y%m%d-%H%M%S)-$$"
     tmux_exec new-session -d -s "$session_name" -c "$START_DIR"
+    trace_log "create session=${session_name} path=${START_DIR} fallback=1"
     printf '%s\n' "$session_name"
 }
 
@@ -193,6 +206,7 @@ set_batch_mode_if_needed() {
     fi
 
     printf '%s\n' "$BATCH_MODE" > "$MODE_FILE"
+    trace_log "batch_mode=${BATCH_MODE} session_count=${session_count} client_count=${client_count}"
 }
 
 session_is_claimed() {
@@ -202,6 +216,29 @@ session_is_claimed() {
         claimed="$(cat "$CLAIMED_FILE")"
     fi
     printf '%s\n' "$claimed" | grep -qxF "$session_name"
+}
+
+claimed_line_count() {
+    if [[ -f "$CLAIMED_FILE" ]]; then
+        wc -l < "$CLAIMED_FILE" | tr -d '[:space:]'
+    else
+        echo "0"
+    fi
+}
+
+wait_for_claim_growth() {
+    local before="$1"
+    local after="$before"
+    local i=0
+    while (( i < 20 )); do
+        after="$(claimed_line_count)"
+        if (( after > before )); then
+            return 0
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+    return 1
 }
 
 count_unclaimed_unattached_sessions() {
@@ -225,12 +262,18 @@ open_ghostty_tab() {
     [[ "$(uname)" == "Darwin" ]] || return 1
     [[ -x /usr/bin/osascript ]] || return 1
 
-    /usr/bin/osascript >/dev/null 2>&1 <<'APPLESCRIPT'
+    if /usr/bin/osascript >/dev/null 2>&1 <<'APPLESCRIPT'
 tell application "Ghostty" to activate
 tell application "System Events"
     keystroke "t" using command down
 end tell
 APPLESCRIPT
+    then
+        trace_log "fill open_tab=ok"
+        return 0
+    fi
+    trace_log "fill open_tab=failed"
+    return 1
 }
 
 fill_restore_tabs_if_needed() {
@@ -241,11 +284,15 @@ fill_restore_tabs_if_needed() {
 
     # One helper per batch.
     if [[ -f "$FILL_FILE" ]]; then
+        trace_log "fill skip=already_running"
         return 0
     fi
     printf '%s\n' "$$" > "$FILL_FILE"
+    trace_log "fill start"
 
     (
+        trap 'rm -f "$FILL_FILE"' EXIT
+
         # Let Ghostty finish launching its own restored tabs first.
         sleep 1.0
         local iter=0
@@ -256,13 +303,22 @@ fill_restore_tabs_if_needed() {
             release_lock
 
             if [[ -z "$missing" || "$missing" -le 0 ]]; then
+                trace_log "fill done missing=${missing:-0}"
                 exit 0
             fi
 
+            local before
+            before="$(claimed_line_count)"
+
             open_ghostty_tab || exit 0
+            if ! wait_for_claim_growth "$before"; then
+                trace_log "fill stop=no_claim_growth before=${before} missing=${missing}"
+                exit 0
+            fi
             iter=$((iter + 1))
             sleep 0.2
         done
+        trace_log "fill stop=max_iter"
     ) >/dev/null 2>&1 &
 }
 
@@ -310,6 +366,7 @@ cleanup_stale_batch_files_if_needed() {
         local fill_age
         fill_age="$(file_age_seconds "$FILL_FILE")"
         if (( fill_age > FILL_STALE_SECONDS )); then
+            trace_log "cleanup stale_fill age=${fill_age}"
             rm -f "$FILL_FILE"
         fi
     fi
@@ -324,6 +381,7 @@ cleanup_stale_batch_files_if_needed() {
         local local_age
         local_age="$(file_age_seconds "$PENDING_FILE")"
         if (( local_age > PENDING_STALE_SECONDS )); then
+            trace_log "cleanup stale_batch age=${local_age}"
             rm -f "$PENDING_FILE"
             rm -f "$CLAIMED_FILE"
             rm -f "$MODE_FILE"
@@ -397,6 +455,7 @@ cleanup_stale_batch_files_if_needed
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
 pending=$((pending + 1))
 echo "$pending" > "$PENDING_FILE"
+trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION}"
 
 # 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
 #    saved snapshot, restore it now before making any session decisions.
@@ -415,12 +474,14 @@ fill_restore_tabs_if_needed
 #    attach. The session exists before any other instance can run, preventing
 #    duplicates.
 if ! tmux_exec has-session -t "$BASE_SESSION" 2>/dev/null; then
+    trace_log "base_missing create_base=${BASE_SESSION}"
     tmux_exec new-session -d -s "$BASE_SESSION" -c "$START_DIR"
     attach_or_print "$BASE_SESSION"
 fi
 
 # 2. Force new session requested via env var.
 if [[ "$FORCE_NEW_SESSION" == "1" ]]; then
+    trace_log "force_new=1"
     next_session="$(create_next_session)"
     attach_or_print "$next_session"
 fi
@@ -437,6 +498,7 @@ fi
 client_count="$(tmux_client_count)"
 
 if (( pending == 1 && client_count == 0 )); then
+    trace_log "attach_base first_in_batch client_count=0"
     echo "$BASE_SESSION" >> "$CLAIMED_FILE"
     attach_or_print "$BASE_SESSION"
 fi
@@ -447,6 +509,7 @@ fi
 if [[ "$BATCH_MODE" == "restore" && "$pending" -gt 1 ]]; then
     unattached="$(find_unattached_session || true)"
     if [[ -n "$unattached" ]]; then
+        trace_log "reattach existing=${unattached}"
         echo "$unattached" >> "$CLAIMED_FILE"
         attach_or_print "$unattached"
     fi

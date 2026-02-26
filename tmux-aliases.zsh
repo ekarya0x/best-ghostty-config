@@ -5,14 +5,32 @@
 #   [[ -f ~/.config/ghostty/tmux-aliases.zsh ]] && source ~/.config/ghostty/tmux-aliases.zsh
 
 alias tls='tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}"'
+alias twin='tmux list-windows -a -F "#{session_name}:#{window_index} active=#{window_active} panes=#{window_panes} name=#{window_name}"'
+alias tpanes='tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} active=#{pane_active} cmd=#{pane_current_command} cwd=#{pane_current_path}"'
+alias ttree='tmux choose-tree -sZw'
 alias tmain='tgo main'
 
 __tmux_list() {
     tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}" 2>/dev/null
 }
 
+__tmux_normalize_target() {
+    local raw="$1"
+    raw="${raw//[[:space:]]/}"
+    if [[ "$raw" =~ ^[0-9]+$ ]]; then
+        echo "main-${raw}"
+        return 0
+    fi
+    echo "$raw"
+}
+
+trepl() {
+    ~/.config/ghostty/tmux-repl.sh "$@"
+}
+
 tgo() {
-    local target="$1"
+    local target
+    target="$(__tmux_normalize_target "${1:-}")"
     if [[ -z "$target" ]]; then
         echo "usage: tgo <session>"
         __tmux_list
@@ -86,10 +104,7 @@ tkill() {
         fi
     fi
 
-    # Convenience: allow `tkill 6` to mean `main-6`.
-    if [[ "$target" =~ '^[0-9]+$' ]]; then
-        target="main-${target}"
-    fi
+    target="$(__tmux_normalize_target "$target")"
 
     if ! tmux has-session -t "$target" 2>/dev/null; then
         echo "session not found: $target"

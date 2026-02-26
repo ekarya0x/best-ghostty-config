@@ -151,11 +151,28 @@ ssh host -t tmux attach -t main                      # remote attach
 
 ```bash
 tls                 # compact list (session + attached + windows)
+twin                # all windows across sessions
+tpanes              # all panes (cmd + cwd)
+ttree               # built-in chooser tree (sessions/windows/panes)
 tgo main-2          # jump/attach
+tnew                # create next main-N and attach
 tprev               # switch to most recently used other session
 tkill main-2        # kill target session safely
 tkillc              # kill current session and jump to another
 tprune              # kill detached main-* sessions
+trepl               # interactive slash-command tmux REPL
+```
+
+### tmux REPL (`trepl`)
+
+```bash
+trepl
+# /help
+# /sessions
+# /tree
+# /choose
+# /doctor
+# /trace on
 ```
 
 ---
