@@ -103,6 +103,15 @@ Enter with `prefix + [`, then:
 | `n` / `N` | Next / previous match |
 | `Esc` or `q` | Exit copy mode |
 
+### Persistence (tmux-resurrect)
+
+| Key | Action |
+|---|---|
+| `Ctrl+S` | Save all sessions to disk (manual snapshot) |
+| `Ctrl+R` | Restore sessions from last snapshot |
+
+Auto-save runs every 5 minutes via tmux-continuum. Manual save before risky operations.
+
 ### Utility
 
 | Key | Action |
@@ -111,15 +120,16 @@ Enter with `prefix + [`, then:
 
 ---
 
-## Shutdown & cleanup
+## Shutdown & survival
 
-| Goal | Action | What survives |
+| Action | How | What survives |
 |---|---|---|
-| Leave safely | `prefix+d` or `Cmd+Q` | Everything |
-| Kill one pane | `prefix+x` | Other panes, windows, sessions |
-| Kill one window | `prefix+X` | Other windows, sessions |
-| Kill one session | `tmux kill-session -t <name>` | Other sessions |
-| Kill all tmux | `tmux kill-server` | Nothing |
+| Leave safely | `Cmd+Q` or `prefix+d` | Everything |
+| Close one pane | `prefix+x` | Other panes, windows, sessions |
+| Close one window | `prefix+X` | Other windows, sessions |
+| Kill one session | `tmux kill-session -t name` | Other sessions |
+| Kill all tmux | `tmux kill-server` | Resurrect snapshot on disk |
+| System reboot | — | Resurrect snapshot + Ghostty tab state |
 
 ---
 
@@ -166,4 +176,4 @@ Drops from the top of whichever screen your mouse is on. Auto-hides on click-awa
 - **Ghostty tab ≠ tmux window.** `Cmd+T` = new Ghostty tab + new tmux session. `prefix+c` = new tmux window inside the current session.
 - **Mirroring is expected** when two clients attach to the same session. The launcher prevents it by giving each tab its own session.
 - **`Cmd+Q` is safe.** Ghostty closes. tmux sessions survive. That's the point.
-- **Two persistence layers.** Ghostty restores tabs/windows. tmux keeps sessions/processes alive. Quit and reopen = everything still there.
+- **Three persistence layers.** Ghostty restores tabs/windows. tmux keeps sessions/processes alive in memory. tmux-resurrect saves to disk every 5 minutes. Quit, reboot, come back — everything is still there.
