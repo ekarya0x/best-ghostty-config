@@ -121,7 +121,7 @@ Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.m
 5. **Claim base once.** If there are zero clients and `main` is not yet claimed in this launch burst, claim and attach `main`.
 6. **Restore mode attach.** In restore mode, attach the next unattached unclaimed session (prefers `main-N`, then other names).
 7. **Normal mode / fallback.** If no reusable detached session remains, create the next `main-N`.
-8. **Restore tab fill.** In restore mode, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs.
+8. **Optional restore tab fill.** If `GHOSTTY_TMUX_AUTO_FILL_RESTORE=1`, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs.
 
 A **claimed-sessions file** tracks session assignments inside the current launch burst. This prevents the race where instance N releases the lock before `exec tmux attach` has fully registered a client.
 
@@ -133,6 +133,7 @@ A **claimed-sessions file** tracks session assignments inside the current launch
 | `GHOSTTY_TMUX_SOCKET_NAME` | _(default socket)_ | Named tmux socket (`-L`) |
 | `GHOSTTY_TMUX_NO_ATTACH` | `0` | Print session name instead of attaching |
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
+| `GHOSTTY_TMUX_AUTO_FILL_RESTORE` | `0` | Auto-open extra Ghostty tabs in restore mode (opt-in) |
 | `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/batch/pending/claimed/mode files |
 | `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
 | `GHOSTTY_TMUX_TRACE` | `0` | Enable launcher trace logging |
@@ -400,7 +401,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 151 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 152 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -411,7 +412,7 @@ best-ghostty-config/
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             151-assertion test suite
+  test.sh             152-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

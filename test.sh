@@ -98,6 +98,7 @@ check_ok "tmux-aliases.zsh: zsh -n syntax" zsh -n "$TMUX_ALIASES_FILE"
 # Verify shebang
 shebang=$(head -1 "$SCRIPT")
 check "shebang is #!/usr/bin/env bash" "#!/usr/bin/env bash" "$shebang"
+check_ok "auto-fill restore default present" grep -q 'AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"' "$SCRIPT"
 
 check "tmux-aliases: normalize numeric target" "main-6" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; __tmux_normalize_target 6')"
 

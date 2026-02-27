@@ -13,6 +13,7 @@ readonly BASE_SESSION
 readonly SOCKET_NAME="${GHOSTTY_TMUX_SOCKET_NAME:-}"
 readonly NO_ATTACH="${GHOSTTY_TMUX_NO_ATTACH:-0}"
 readonly FORCE_NEW_SESSION="${GHOSTTY_TMUX_FORCE_NEW_SESSION:-0}"
+readonly AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"
 readonly STATE_DIR="${GHOSTTY_TMUX_STATE_DIR:-/tmp}"
 STATE_KEY="${GHOSTTY_TMUX_STATE_KEY:-$(id -u)-${SOCKET_NAME:-default}-${BASE_SESSION}}"
 STATE_KEY="$(printf '%s' "$STATE_KEY" | tr -c 'A-Za-z0-9._-' '_')"
@@ -282,6 +283,7 @@ fill_restore_tabs_if_needed() {
     # Only meaningful for real interactive launches.
     [[ "$NO_ATTACH" == "1" ]] && return 0
     [[ "$BATCH_MODE" == "restore" ]] || return 0
+    [[ "$AUTO_FILL_RESTORE" == "1" ]] || return 0
 
     # Run at most once per launch burst.
     if [[ -f "$FILL_MARK_FILE" ]]; then
@@ -481,7 +483,7 @@ ensure_batch_initialized
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
 pending=$((pending + 1))
 echo "$pending" > "$PENDING_FILE"
-trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION}"
+trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION} auto_fill=${AUTO_FILL_RESTORE}"
 
 # 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
 #    saved snapshot, restore it now before making any session decisions.
