@@ -54,7 +54,8 @@ The installer:
 - Installs tmux via Homebrew if missing
 - Installs TPM + tmux-resurrect + tmux-continuum
 - Symlinks config files with timestamped backups
-- Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`, `trunaway`, `thoston`, `tvpncheck`, `tmosh`)
+- Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`, `trunaway`, `thoston`, `tvpncheck`, `tsshcheck`, `tmosh`)
+- Installs tmux command shims in PATH (`tkillc`, `trunaway`, etc.) for persistent-shell compatibility
 - Fixes the macOS Ctrl+Space input source conflict
 - Checks for JetBrains Mono
 - Reloads tmux if running
@@ -125,7 +126,7 @@ Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.m
 7. **Normal mode / fallback.** If no reusable detached session remains, create the next `main-N`.
 8. **Optional restore tab fill.** If `GHOSTTY_TMUX_AUTO_FILL_RESTORE=1`, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs. Fill is capped by `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` (default `12`) to prevent runaway tab storms.
 
-A **claimed-sessions file** tracks session assignments inside the current launch burst. This prevents the race where instance N releases the lock before `exec tmux attach` has fully registered a client.
+A **claimed-sessions file** tracks session assignments inside the current launch burst. Claims are PID-scoped and only count while the claiming process is alive, preventing stale claims from a prior Ghostty run from leaking into a fast relaunch.
 
 **Environment variables:**
 
@@ -137,6 +138,7 @@ A **claimed-sessions file** tracks session assignments inside the current launch
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
 | `GHOSTTY_TMUX_AUTO_FILL_RESTORE` | `0` | Auto-open extra Ghostty tabs in restore mode (opt-in) |
 | `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` | `12` | Safety cap for auto-fill tab creation during restore |
+| `GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS` | `2` | Quiet-period gate before auto-fill opens synthetic tabs |
 | `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/batch/pending/claimed/mode files |
 | `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
 | `GHOSTTY_TMUX_TRACE` | `0` | Enable launcher trace logging |
@@ -198,9 +200,12 @@ thostoff            # disable host-awake mode
 tvpncheck host      # verify Tailscale reachability to host
 tmoshdoctor host    # reachability + remote mosh-server check
 tmosh host          # connect over Mosh with preflight checks
+tsshcheck host      # raw SSH reachability probe
 gdrift              # list hidden assume-unchanged files
 gdriftfix           # clear assume-unchanged flags in current repo
 ```
+
+Installer also creates command shims (`tkillc`, `trunaway`, etc.) in a PATH directory so they still work in older tmux shells that haven't re-sourced `~/.zshrc`.
 
 ### Guarded runaway cleanup
 
@@ -225,6 +230,7 @@ Default is always dry-run; `--apply` is required to kill.
 - By default (`GHOSTTY_TMUX_AUTO_FILL_RESTORE=0`), launcher never opens extra Ghostty tabs on its own.
 - When enabled (`=1`), it may open additional tabs only during restore mode to reattach detached sessions.
 - Auto-fill now has a hard safety cap (`GHOSTTY_TMUX_AUTO_FILL_MAX_TABS`, default `12`) so one launch cannot spawn unlimited tabs.
+- Auto-fill waits for a quiet settle window (`GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS`, default `2`) before opening tabs, which reduces restore flicker/races.
 - This repository currently opts in via the Ghostty `command` line:
   `command = env GHOSTTY_TMUX_AUTO_FILL_RESTORE=1 GHOSTTY_TMUX_AUTO_FILL_MAX_TABS=12 ~/.config/ghostty/ghostty-tmux.sh`
 
@@ -264,6 +270,7 @@ thoston
 
 # preflight reachability
 tvpncheck your-host.tailnet.ts.net
+tsshcheck your-host.tailnet.ts.net
 tmoshdoctor your-host.tailnet.ts.net
 
 # attach to tmux over mosh
@@ -272,6 +279,7 @@ tmosh your-host.tailnet.ts.net -- tmux attach -t main
 
 Notes:
 - `tvpncheck` runs local status + `tailscale ping --tsmp` + peer ping.
+- `tsshcheck` validates plain SSH connectivity (`BatchMode=yes`, `ConnectTimeout=5`).
 - `tmoshdoctor` adds a remote `mosh-server` presence check via non-interactive SSH.
 - `tmosh` runs preflight by default; `--no-check` skips it.
 - Mosh defaults to UDP ports `60000:61000` unless overridden (`tmosh --port ...`).
@@ -433,6 +441,13 @@ tail -n 200 "$TRACE_FILE"
 ```
 Look for repeated `select session=main` lines in the same launch burst key; that indicates incorrect claim state.
 
+**`tkillc` / `trunaway` says `command not found`.**
+Either source your current shell once (`source ~/.zshrc`) or use the installed command shims (installed in a PATH directory by `./install.sh`). Verify with:
+```bash
+command -v tkillc
+command -v trunaway
+```
+
 **Ctrl+Space doesn't work.**
 macOS captures it for input source switching. System Settings → Keyboard → Keyboard Shortcuts → Input Sources → uncheck "Select the previous input source." Use `Ctrl+A` as fallback.
 
@@ -491,7 +506,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 165 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, alias safety, and launch latency benchmarks. Does not touch live sessions.
+Runs 172 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, alias safety, command shim wiring, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -500,9 +515,10 @@ best-ghostty-config/
   config              Ghostty settings + keybindings
   ghostty-tmux.sh     Session launcher — atomic locking, reattachment, resurrect restore
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
+  tmux-command-shim.zsh command shim dispatcher for PATH-based helpers
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             165-assertion test suite
+  test.sh             172-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

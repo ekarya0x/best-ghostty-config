@@ -12,6 +12,7 @@ INSTALL_SCRIPT="${REPO_DIR}/install.sh"
 TMUX_CONF_FILE="${REPO_DIR}/tmux.conf"
 GHOSTTY_CONFIG_FILE="${REPO_DIR}/config"
 TMUX_ALIASES_FILE="${REPO_DIR}/tmux-aliases.zsh"
+TMUX_COMMAND_SHIM_FILE="${REPO_DIR}/tmux-command-shim.zsh"
 SOCKET="bgctest$$"
 STATE_KEY="bgctest-state-${SOCKET}"
 LOCK_DIR="/tmp/ghostty-tmux-${STATE_KEY}.lock"
@@ -91,6 +92,7 @@ check_ok "ghostty-tmux.sh: bash -n syntax" bash -n "$SCRIPT"
 check_ok "install.sh: bash -n syntax" bash -n "$INSTALL_SCRIPT"
 check_ok "ghostty-tmux.sh: executable" test -x "$SCRIPT"
 check_ok "install.sh: executable" test -x "$INSTALL_SCRIPT"
+check_ok "tmux-command-shim.zsh: executable" test -x "$TMUX_COMMAND_SHIM_FILE"
 check_ok "tmux binary reachable" command -v tmux
 check_ok "zsh binary reachable" command -v zsh
 check_ok "tmux-aliases.zsh: zsh -n syntax" zsh -n "$TMUX_ALIASES_FILE"
@@ -100,6 +102,7 @@ shebang=$(head -1 "$SCRIPT")
 check "shebang is #!/usr/bin/env bash" "#!/usr/bin/env bash" "$shebang"
 check_ok "auto-fill restore default present" grep -q 'AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"' "$SCRIPT"
 check_ok "auto-fill max tabs default present" grep -q 'AUTO_FILL_RESTORE_MAX_TABS="${GHOSTTY_TMUX_AUTO_FILL_MAX_TABS:-12}"' "$SCRIPT"
+check_ok "auto-fill settle default present" grep -q 'AUTO_FILL_SETTLE_SECONDS="${GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS:-2}"' "$SCRIPT"
 
 check "tmux-aliases: normalize numeric target" "main-6" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; __tmux_normalize_target 6')"
 check_ok "tmux-aliases: has trunaway()" grep -q '^trunaway()' "$TMUX_ALIASES_FILE"
@@ -109,10 +112,12 @@ check_ok "tmux-aliases: has thostoff()" grep -q '^thostoff()' "$TMUX_ALIASES_FIL
 check_ok "tmux-aliases: has gdrift()" grep -q '^gdrift()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has gdriftfix()" grep -q '^gdriftfix()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has tvpncheck()" grep -q '^tvpncheck()' "$TMUX_ALIASES_FILE"
+check_ok "tmux-aliases: has tsshcheck()" grep -q '^tsshcheck()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has tmosh()" grep -q '^tmosh()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has tmoshdoctor()" grep -q '^tmoshdoctor()' "$TMUX_ALIASES_FILE"
 check "tmux-aliases: gdrift outside repo guard" "not inside a git repository" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; (cd /tmp && gdrift)')"
 check "tmux-aliases: tvpncheck usage" "usage: tvpncheck <tailscale-host-or-ip>" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; tvpncheck 2>/dev/null | head -n1')"
+check "tmux-aliases: tsshcheck usage" "usage: tsshcheck [--port N] [--identity FILE] <host>" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; tsshcheck 2>/dev/null | head -n1')"
 check "tmux-aliases: tmosh help usage" "usage: tmosh [--no-check] [--ssh \"ssh ...\"] [--port UDP_PORT] <tailscale-host-or-ip> [-- remote-command...]" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; tmosh --help | head -n1')"
 
 # ============================================================================
@@ -314,13 +319,13 @@ tmux -L "$SOCKET" new-session -d -s main
 tmux -L "$SOCKET" new-session -d -s main-2
 tmux -L "$SOCKET" new-session -d -s main-3
 r1=$(run); r2=$(run); r3=$(run)
-claimed=$(sort "$CLAIMED_FILE" 2>/dev/null)
+claimed=$(awk '{print $2}' "$CLAIMED_FILE" 2>/dev/null | sort)
 expected=$(printf 'main\nmain-2\nmain-3')
 check "claimed: tracks all 3" "$expected" "$claimed"
 
 # New session creation also tracked
 r4=$(run)
-claimed_last=$(tail -1 "$CLAIMED_FILE" 2>/dev/null)
+claimed_last=$(tail -1 "$CLAIMED_FILE" 2>/dev/null | awk '{print $2}')
 check "claimed: new session '$r4' also tracked" "$r4" "$claimed_last"
 
 # ============================================================================
@@ -499,11 +504,14 @@ check_ok "has link_file()" grep -q 'link_file()' "$is"
 check_ok "has link_tmux_aliases()" grep -q 'link_tmux_aliases()' "$is"
 check_ok "has remove_deprecated_files()" grep -q 'remove_deprecated_files()' "$is"
 check_ok "has ensure_zsh_sources_tmux_aliases()" grep -q 'ensure_zsh_sources_tmux_aliases()' "$is"
+check_ok "has pick_tmux_shim_dir()" grep -q 'pick_tmux_shim_dir()' "$is"
+check_ok "has install_tmux_command_shims()" grep -q 'install_tmux_command_shims()' "$is"
 check_ok "has handle_macos_app_support()" grep -q 'handle_macos_app_support()' "$is"
 check_ok "has reload_tmux_if_running()" grep -q 'reload_tmux_if_running()' "$is"
 check_ok "main calls install_tpm_plugins" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q install_tpm_plugins'
 check_ok "main calls reload_tmux_if_running" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q reload_tmux_if_running'
 check_ok "main calls link_tmux_aliases" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q link_tmux_aliases'
+check_ok "main calls install_tmux_command_shims" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q install_tmux_command_shims'
 check_ok "main calls remove_deprecated_files" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q remove_deprecated_files'
 check_ok "TPM cloned with --depth 1" grep -q 'clone --depth 1' "$is"
 

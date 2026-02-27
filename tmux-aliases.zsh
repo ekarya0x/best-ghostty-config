@@ -403,6 +403,68 @@ EOF
     echo "vpn reachability OK: $target"
 }
 
+tsshcheck() {
+    local ssh_port="${TSSHCHECK_PORT:-22}"
+    local ssh_identity=""
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --port)
+                shift
+                ssh_port="${1:-}"
+                [[ "$ssh_port" == <-> ]] || { echo "invalid --port: $ssh_port"; return 1; }
+                shift
+                ;;
+            --identity)
+                shift
+                ssh_identity="${1:-}"
+                [[ -n "$ssh_identity" ]] || { echo "missing value for --identity"; return 1; }
+                shift
+                ;;
+            -h|--help)
+                cat <<'EOF'
+usage: tsshcheck [--port N] [--identity FILE] <host>
+
+Checks non-interactive SSH reachability with:
+  BatchMode=yes
+  ConnectTimeout=5
+EOF
+                return 0
+                ;;
+            -*)
+                echo "unknown option: $1"
+                return 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    local target="${1:-}"
+    if [[ -z "$target" ]]; then
+        echo "usage: tsshcheck [--port N] [--identity FILE] <host>"
+        return 1
+    fi
+
+    command -v ssh >/dev/null 2>&1 || { echo "ssh not found"; return 1; }
+
+    local -a ssh_cmd
+    ssh_cmd=(ssh -o BatchMode=yes -o ConnectTimeout=5 -p "$ssh_port")
+    if [[ -n "$ssh_identity" ]]; then
+        ssh_cmd+=(-i "$ssh_identity")
+    fi
+    ssh_cmd+=("$target" "echo ssh-reachable")
+
+    if "${ssh_cmd[@]}" >/dev/null 2>&1; then
+        echo "ssh reachability OK: $target:$ssh_port"
+        return 0
+    fi
+
+    echo "ssh reachability FAILED: $target:$ssh_port"
+    return 1
+}
+
 tmoshdoctor() {
     local target="${1:-}"
     if [[ -z "$target" ]]; then
@@ -410,10 +472,10 @@ tmoshdoctor() {
         return 1
     fi
 
-    command -v ssh >/dev/null 2>&1 || { echo "ssh not found"; return 1; }
     command -v mosh >/dev/null 2>&1 || { echo "mosh not found"; return 1; }
 
     tvpncheck "$target" || return 1
+    tsshcheck "$target" || return 1
 
     echo "[4/4] remote mosh-server check"
     if ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" 'command -v mosh-server >/dev/null'; then

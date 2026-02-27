@@ -226,6 +226,71 @@ ensure_zsh_sources_tmux_aliases() {
     log_success "Added tmux aliases source line to ~/.zshrc."
 }
 
+pick_tmux_shim_dir() {
+    local candidate
+    for candidate in /opt/homebrew/bin /usr/local/bin; do
+        if [[ -d "$candidate" && -w "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    local fallback="$HOME/.local/bin"
+    mkdir -p "$fallback"
+    printf '%s\n' "$fallback"
+}
+
+ensure_zsh_path_has_local_bin() {
+    local zshrc="$HOME/.zshrc"
+    local path_line='export PATH="$HOME/.local/bin:$PATH"'
+
+    [[ -f "$zshrc" ]] || touch "$zshrc"
+    if grep -Fqx "$path_line" "$zshrc"; then
+        return 0
+    fi
+
+    {
+        echo ""
+        echo "# ~/.local/bin (best-ghostty-config command shims)"
+        echo "$path_line"
+    } >> "$zshrc"
+    log_success "Added ~/.local/bin to PATH in ~/.zshrc."
+}
+
+install_tmux_command_shims() {
+    local dispatcher_source="$REPO_DIR/tmux-command-shim.zsh"
+    [[ -f "$dispatcher_source" ]] || {
+        log_warn "tmux command shim missing: $dispatcher_source"
+        return 0
+    }
+    chmod +x "$dispatcher_source"
+
+    local shim_dir
+    shim_dir="$(pick_tmux_shim_dir)"
+    if [[ "$shim_dir" == "$HOME/.local/bin" ]]; then
+        ensure_zsh_path_has_local_bin
+    fi
+
+    local dispatcher_target="$shim_dir/tmux-alias-dispatch"
+    if [[ -e "$dispatcher_target" && ! -L "$dispatcher_target" ]]; then
+        log_warn "Skipping shim install: $dispatcher_target exists and is not a symlink."
+        return 0
+    fi
+    ln -sfn "$dispatcher_source" "$dispatcher_target"
+
+    local cmd
+    for cmd in tgo tnew tprev tkill tkillc tprune trunaway thoston thostoff thoststatus gdrift gdriftfix tvpncheck tsshcheck tmoshdoctor tmosh; do
+        local target="$shim_dir/$cmd"
+        if [[ -e "$target" && ! -L "$target" ]]; then
+            log_warn "Skipping command shim: $target exists and is not a symlink."
+            continue
+        fi
+        ln -sfn "$dispatcher_target" "$target"
+    done
+
+    log_success "Installed tmux command shims in $shim_dir."
+}
+
 # --- Symlink management ---
 
 link_file() {
@@ -304,6 +369,7 @@ main() {
     link_file "$REPO_DIR/config" "$XDG_CONFIG/config" "Ghostty (XDG)"
     link_launcher_paths
     link_tmux_aliases
+    install_tmux_command_shims
     remove_deprecated_files
     handle_macos_app_support
     link_file "$REPO_DIR/tmux.conf" "$HOME/.tmux.conf" "tmux"

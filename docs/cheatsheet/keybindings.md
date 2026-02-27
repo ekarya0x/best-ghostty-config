@@ -168,6 +168,7 @@ thoston             # keep host awake (macOS)
 thoststatus         # show host-awake status
 thostoff            # disable host-awake mode
 tvpncheck host      # verify Tailscale reachability to host
+tsshcheck host      # verify plain SSH connectivity to host
 tmoshdoctor host    # check VPN path + remote mosh-server
 tmosh host          # connect over Mosh with preflight checks
 gdrift              # list hidden assume-unchanged files

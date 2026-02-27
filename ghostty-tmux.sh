@@ -53,6 +53,11 @@ readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 readonly BATCH_STALE_SECONDS=30
 readonly FILL_STALE_SECONDS=25
+AUTO_FILL_SETTLE_SECONDS="${GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS:-2}"
+if ! [[ "$AUTO_FILL_SETTLE_SECONDS" =~ ^[0-9]+$ ]]; then
+    AUTO_FILL_SETTLE_SECONDS=2
+fi
+readonly AUTO_FILL_SETTLE_SECONDS
 readonly TRACE_ENABLED="${GHOSTTY_TMUX_TRACE:-0}"
 readonly TRACE_FILE="${GHOSTTY_TMUX_TRACE_FILE:-${STATE_DIR}/ghostty-tmux-${STATE_KEY}.trace.log}"
 
@@ -219,19 +224,63 @@ set_batch_mode_if_needed() {
 
 session_is_claimed() {
     local session_name="$1"
-    local claimed=""
-    if [[ -f "$CLAIMED_FILE" ]]; then
-        claimed="$(cat "$CLAIMED_FILE")"
-    fi
-    printf '%s\n' "$claimed" | grep -qxF "$session_name"
+    local pid claimed
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        # New format: "<pid> <session>"
+        if [[ "$line" =~ ^([0-9]+)[[:space:]]+(.+)$ ]]; then
+            pid="${BASH_REMATCH[1]}"
+            claimed="${BASH_REMATCH[2]}"
+            [[ "$claimed" == "$session_name" ]] || continue
+            if [[ "$pid" == "0" ]]; then
+                return 0
+            fi
+            if kill -0 "$pid" 2>/dev/null; then
+                return 0
+            fi
+            continue
+        fi
+    done < "$CLAIMED_FILE" 2>/dev/null || true
+    return 1
 }
 
 claimed_line_count() {
-    if [[ -f "$CLAIMED_FILE" ]]; then
-        wc -l < "$CLAIMED_FILE" | tr -d '[:space:]'
-    else
-        echo "0"
+    local count=0
+    local pid
+    while IFS= read -r line; do
+        [[ "$line" =~ ^([0-9]+)[[:space:]]+(.+)$ ]] || continue
+        pid="${BASH_REMATCH[1]}"
+        if [[ "$pid" == "0" ]] || kill -0 "$pid" 2>/dev/null; then
+            count=$((count + 1))
+        fi
+    done < "$CLAIMED_FILE" 2>/dev/null || true
+    printf '%s\n' "$count"
+}
+
+append_claimed_session() {
+    local session_name="$1"
+    local claim_pid="$$"
+    if [[ "$NO_ATTACH" == "1" ]]; then
+        claim_pid="0"
     fi
+    printf '%s %s\n' "$claim_pid" "$session_name" >> "$CLAIMED_FILE"
+}
+
+prune_claimed_file() {
+    [[ -f "$CLAIMED_FILE" ]] || return 0
+
+    local tmp="${CLAIMED_FILE}.tmp.$$"
+    : > "$tmp"
+    local pid claimed
+    while IFS= read -r line; do
+        [[ "$line" =~ ^([0-9]+)[[:space:]]+(.+)$ ]] || continue
+        pid="${BASH_REMATCH[1]}"
+        claimed="${BASH_REMATCH[2]}"
+        if [[ "$pid" == "0" ]] || kill -0 "$pid" 2>/dev/null; then
+            printf '%s %s\n' "$pid" "$claimed" >> "$tmp"
+        fi
+    done < "$CLAIMED_FILE" 2>/dev/null || true
+    mv "$tmp" "$CLAIMED_FILE"
 }
 
 wait_for_claim_growth() {
@@ -316,6 +365,14 @@ fill_restore_tabs_if_needed() {
         sleep 1.0
         local iter=0
         while (( iter < AUTO_FILL_RESTORE_MAX_TABS )); do
+            # Wait for launcher burst to settle before opening synthetic tabs.
+            local batch_age
+            batch_age="$(file_age_seconds "$BATCH_FILE")"
+            if (( batch_age < AUTO_FILL_SETTLE_SECONDS )); then
+                sleep 0.25
+                continue
+            fi
+
             acquire_lock
             local missing
             missing="$(count_unclaimed_unattached_sessions)"
@@ -337,7 +394,7 @@ fill_restore_tabs_if_needed() {
             iter=$((iter + 1))
             sleep 0.25
         done
-        trace_log "fill stop=max_tabs opened=${iter} max=${AUTO_FILL_RESTORE_MAX_TABS}"
+        trace_log "fill stop=max_tabs opened=${iter} max=${AUTO_FILL_RESTORE_MAX_TABS} settle=${AUTO_FILL_SETTLE_SECONDS}"
     ) >/dev/null 2>&1 &
 }
 
@@ -423,6 +480,7 @@ ensure_batch_initialized() {
     fi
 
     touch "$BATCH_FILE" 2>/dev/null || true
+    prune_claimed_file
 }
 
 # ---------------------------------------------------------------------------
@@ -492,7 +550,7 @@ ensure_batch_initialized
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
 pending=$((pending + 1))
 echo "$pending" > "$PENDING_FILE"
-trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION} auto_fill=${AUTO_FILL_RESTORE} auto_fill_max=${AUTO_FILL_RESTORE_MAX_TABS}"
+trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION} auto_fill=${AUTO_FILL_RESTORE} auto_fill_max=${AUTO_FILL_RESTORE_MAX_TABS} auto_fill_settle=${AUTO_FILL_SETTLE_SECONDS}"
 
 # 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
 #    saved snapshot, restore it now before making any session decisions.
@@ -536,7 +594,7 @@ client_count="$(tmux_client_count)"
 
 if (( client_count == 0 )) && ! session_is_claimed "$BASE_SESSION"; then
     trace_log "attach_base claimed=0 client_count=0"
-    echo "$BASE_SESSION" >> "$CLAIMED_FILE"
+    append_claimed_session "$BASE_SESSION"
     attach_or_print "$BASE_SESSION"
 fi
 
@@ -547,7 +605,7 @@ if [[ "$BATCH_MODE" == "restore" ]]; then
     unattached="$(find_unattached_session || true)"
     if [[ -n "$unattached" ]]; then
         trace_log "reattach existing=${unattached}"
-        echo "$unattached" >> "$CLAIMED_FILE"
+        append_claimed_session "$unattached"
         attach_or_print "$unattached"
     fi
 fi
@@ -557,5 +615,5 @@ fi
 # Record it in the claimed file so a subsequent instance (whose lock-acquire
 # may win before our exec completes) won't see it as "unattached".
 next_session="$(create_next_session)"
-echo "$next_session" >> "$CLAIMED_FILE"
+append_claimed_session "$next_session"
 attach_or_print "$next_session"
