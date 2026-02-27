@@ -194,14 +194,17 @@ create_next_session() {
 
 file_age_seconds() {
     local file="$1"
-    local mtime now
+    local mtime now age
     now="$(date +%s)"
     if [[ "$(uname)" == "Darwin" ]]; then
         mtime=$(stat -f%m "$file" 2>/dev/null || echo "$now")
     else
         mtime=$(stat -c%Y "$file" 2>/dev/null || echo "$now")
     fi
-    echo $(( now - mtime ))
+    age=$(( now - mtime ))
+    # Clamp to 0 if clock skew produces a future mtime.
+    (( age < 0 )) && age=0
+    echo "$age"
 }
 
 resurrect_snapshot_non_shell_panes() {

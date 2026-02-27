@@ -414,7 +414,8 @@ tsaves() {
 
     local -a files
     files=("${(@f)$(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null)}")
-    if (( ${#files[@]} == 0 )); then
+    # zsh (@f) on empty output produces ("") not (); check first element.
+    if (( ${#files[@]} == 0 )) || [[ -z "${files[1]}" ]]; then
         echo "no resurrect snapshots found in $dir"
         return 0
     fi
@@ -470,7 +471,8 @@ EOF
 
     local -a files
     files=("${(@f)$(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null)}")
-    if (( ${#files[@]} == 0 )); then
+    # zsh (@f) on empty output produces ("") not (); check first element.
+    if (( ${#files[@]} == 0 )) || [[ -z "${files[1]}" ]]; then
         echo "no resurrect snapshots found in $dir"
         return 1
     fi
@@ -516,7 +518,27 @@ EOF
     [[ -x "$restore_script" ]] || { echo "restore script not found: $restore_script"; return 1; }
 
     ln -fs "$(basename "$selected")" "$dir/last"
+
+    # Restore script needs a running tmux server. Bootstrap one if absent.
+    local needs_cleanup=0
+    if ! tmux list-sessions 2>/dev/null | grep -q .; then
+        tmux new-session -d -s "_bgc_restore" -c "$HOME" 2>/dev/null || {
+            echo "failed to start tmux server for restore"; return 1
+        }
+        needs_cleanup=1
+    fi
+
     TMUX="" "$restore_script"
+
+    if (( needs_cleanup )) && tmux has-session -t "_bgc_restore" 2>/dev/null; then
+        # Remove bootstrap if real sessions were restored.
+        local restored_count
+        restored_count="$(tmux list-sessions 2>/dev/null | wc -l | tr -d '[:space:]')"
+        if (( restored_count > 1 )); then
+            tmux kill-session -t "_bgc_restore" 2>/dev/null || true
+        fi
+    fi
+
     echo "restore complete from $(basename "$selected")"
 }
 

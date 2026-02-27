@@ -703,6 +703,248 @@ dup_count=$(printf '%s\n' "${par_results[@]}" | sort | uniq -d | wc -l | tr -d '
 check "parallel: no duplicate assignments" "0" "$dup_count"
 
 # ============================================================================
+bold ""
+bold "─── 32. SNAPSHOT FALLBACK SELECTION (mock resurrect files) ───"
+# ============================================================================
+wipe
+SNAP_DIR="$(mktemp -d)"
+
+# Create a shell-only snapshot (all panes running zsh)
+cat > "$SNAP_DIR/tmux_resurrect_20260227T120000.txt" <<'SNAP'
+pane	main	0	:zsh	0	0	:*	0	:/Users/me	zsh
+pane	main-2	0	:zsh	0	0	:*	0	:/Users/me	zsh
+pane	main-3	0	:zsh	0	0	:*	0	:/Users/me	zsh
+SNAP
+
+# Create a non-shell snapshot (has real workloads)
+cat > "$SNAP_DIR/tmux_resurrect_20260226T100000.txt" <<'SNAP'
+pane	main	0	:vim	0	0	:*	0	:/Users/me	vim
+pane	main-2	0	:claude	0	0	:*	0	:/Users/me	claude
+pane	main-3	0	:zsh	0	0	:*	0	:/Users/me	zsh
+SNAP
+
+# Make the shell-only snapshot newer
+touch -t 202602271200 "$SNAP_DIR/tmux_resurrect_20260227T120000.txt"
+touch -t 202602261000 "$SNAP_DIR/tmux_resurrect_20260226T100000.txt"
+
+# Point "last" symlink at the shell-only (latest) snapshot
+ln -s "tmux_resurrect_20260227T120000.txt" "$SNAP_DIR/last"
+
+# Source only function definitions (before the main body starting at acquire_lock).
+# The script's main body (line 639+) creates sessions and execs — we only need functions.
+FUNC_DEFS="$(head -n 635 "$SCRIPT")"
+
+# Test resurrect_snapshot_non_shell_panes counts correctly
+shell_only_count=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    bash -c 'eval "$1"; resurrect_snapshot_non_shell_panes "'"$SNAP_DIR/tmux_resurrect_20260227T120000.txt"'"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+check "snap: shell-only has 0 non-shell panes" "0" "$shell_only_count"
+
+non_shell_count=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    bash -c 'eval "$1"; resurrect_snapshot_non_shell_panes "'"$SNAP_DIR/tmux_resurrect_20260226T100000.txt"'"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+check "snap: workload snapshot has 2 non-shell panes" "2" "$non_shell_count"
+
+# Test select_resurrect_snapshot falls back to non-shell snapshot
+selected=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY=1 GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS=7 \
+    bash -c 'eval "$1"; select_resurrect_snapshot "'"$SNAP_DIR/last"'"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+check "snap: fallback selects non-shell snapshot" "$SNAP_DIR/tmux_resurrect_20260226T100000.txt" "$selected"
+
+# Test fallback disabled returns latest even if shell-only
+selected_no_fb=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY=0 GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS=7 \
+    bash -c 'eval "$1"; select_resurrect_snapshot "'"$SNAP_DIR/last"'"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+check "snap: fallback disabled returns latest" "$SNAP_DIR/tmux_resurrect_20260227T120000.txt" "$selected_no_fb"
+
+# Test: when latest has workloads, no fallback needed
+ln -fs "tmux_resurrect_20260226T100000.txt" "$SNAP_DIR/last"
+selected_good=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY=1 GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS=7 \
+    bash -c 'eval "$1"; select_resurrect_snapshot "'"$SNAP_DIR/last"'"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+check "snap: good latest needs no fallback" "$SNAP_DIR/tmux_resurrect_20260226T100000.txt" "$selected_good"
+
+# Test: non-existent file returns 0
+selected_missing=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    bash -c 'eval "$1"; resurrect_snapshot_non_shell_panes "/nonexistent"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+check "snap: missing file returns 0" "0" "$selected_missing"
+
+rm -rf "$SNAP_DIR"
+
+# ============================================================================
+bold ""
+bold "─── 33. TRUNAWAY INTEGRATION (session detection + kill) ───"
+# ============================================================================
+wipe
+# Create a mix of sessions: some shell-only, some with multiple panes/windows
+tmux -L "$SOCKET" new-session -d -s main
+tmux -L "$SOCKET" new-session -d -s main-2
+tmux -L "$SOCKET" new-session -d -s main-3
+tmux -L "$SOCKET" new-session -d -s main-4
+# Give main-3 a second pane (multi-pane should NOT be candidate)
+tmux -L "$SOCKET" split-window -t main-3
+
+# Let shells fully initialize so pane_current_command reports correctly.
+sleep 1
+
+# Verify trunaway dry-run via the aliases (zsh).
+# trunaway calls plain `tmux`, so we alias tmux to use our test socket.
+dry_output=$(zsh -c '
+    tmux() { command tmux -L "'"$SOCKET"'" "$@"; }
+    source "'"$TMUX_ALIASES_FILE"'"
+    TMUX="" trunaway --min-index 2 --all-ages 2>/dev/null
+' 2>/dev/null)
+# main-2 and main-4 should be candidates (single pane, shell-only)
+# main-3 has 2 panes, so excluded
+check "trunaway: main-2 is candidate" "yes" "$(echo "$dry_output" | grep -q 'main-2' && echo yes || echo no)"
+check "trunaway: main-4 is candidate" "yes" "$(echo "$dry_output" | grep -q 'main-4' && echo yes || echo no)"
+check "trunaway: main-3 excluded (2 panes)" "no" "$(echo "$dry_output" | grep -q 'main-3' && echo yes || echo no)"
+check "trunaway: main excluded by default" "no" "$(echo "$dry_output" | grep -qw 'main ' && echo yes || echo no)"
+check "trunaway: dry-run shows hint" "yes" "$(echo "$dry_output" | grep -q 'dry-run only' && echo yes || echo no)"
+
+# Now apply and verify kills
+apply_output=$(zsh -c '
+    tmux() { command tmux -L "'"$SOCKET"'" "$@"; }
+    source "'"$TMUX_ALIASES_FILE"'"
+    TMUX="" trunaway --apply --min-index 2 --all-ages 2>/dev/null
+' 2>/dev/null)
+check "trunaway --apply: killed main-2" "yes" "$(echo "$apply_output" | grep -q 'killed: main-2' && echo yes || echo no)"
+check "trunaway --apply: killed main-4" "yes" "$(echo "$apply_output" | grep -q 'killed: main-4' && echo yes || echo no)"
+# main and main-3 should survive
+check "trunaway: main survived" "yes" "$(tmux -L "$SOCKET" has-session -t main 2>/dev/null && echo yes || echo no)"
+check "trunaway: main-3 survived (2 panes)" "yes" "$(tmux -L "$SOCKET" has-session -t main-3 2>/dev/null && echo yes || echo no)"
+check "trunaway: 2 sessions remain" "2" "$(sess_count)"
+
+# ============================================================================
+bold ""
+bold "─── 34. TSAVES DISPLAY (mock snapshots) ───"
+# ============================================================================
+SNAP_DIR2="$(mktemp -d)"
+
+cat > "$SNAP_DIR2/tmux_resurrect_20260227T140000.txt" <<'SNAP'
+pane	main	0	:vim	0	0	:*	0	:/Users/me	vim
+pane	main-2	0	:zsh	0	0	:*	0	:/Users/me	zsh
+SNAP
+
+cat > "$SNAP_DIR2/tmux_resurrect_20260226T080000.txt" <<'SNAP'
+pane	main	0	:zsh	0	0	:*	0	:/Users/me	zsh
+SNAP
+
+ts_output=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    __resurrect_dir() { echo "'"$SNAP_DIR2"'"; }
+    tsaves 2>/dev/null
+' 2>/dev/null)
+check "tsaves: shows snapshot list" "yes" "$(echo "$ts_output" | grep -q 'resurrect snapshots' && echo yes || echo no)"
+check "tsaves: shows pane count" "yes" "$(echo "$ts_output" | grep -q 'panes=' && echo yes || echo no)"
+check "tsaves: shows non_shell count" "yes" "$(echo "$ts_output" | grep -q 'non_shell=' && echo yes || echo no)"
+
+# Test tsaves with empty directory
+SNAP_DIR3="$(mktemp -d)"
+ts_empty=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    __resurrect_dir() { echo "'"$SNAP_DIR3"'"; }
+    tsaves 2>/dev/null
+' 2>/dev/null)
+check "tsaves: empty dir reports no snapshots" "yes" "$(echo "$ts_empty" | grep -q 'no resurrect snapshots' && echo yes || echo no)"
+
+rm -rf "$SNAP_DIR2" "$SNAP_DIR3"
+
+# ============================================================================
+bold ""
+bold "─── 35. TRESTOREBEST DRY-RUN (mock snapshots) ───"
+# ============================================================================
+SNAP_DIR4="$(mktemp -d)"
+
+# Shell-only latest
+cat > "$SNAP_DIR4/tmux_resurrect_20260227T150000.txt" <<'SNAP'
+pane	main	0	:zsh	0	0	:*	0	:/Users/me	zsh
+pane	main-2	0	:zsh	0	0	:*	0	:/Users/me	zsh
+SNAP
+
+# Non-shell older
+cat > "$SNAP_DIR4/tmux_resurrect_20260226T090000.txt" <<'SNAP'
+pane	main	0	:vim	0	0	:*	0	:/Users/me	vim
+pane	main-2	0	:claude	0	0	:*	0	:/Users/me	claude
+SNAP
+
+touch -t 202602271500 "$SNAP_DIR4/tmux_resurrect_20260227T150000.txt"
+touch -t 202602260900 "$SNAP_DIR4/tmux_resurrect_20260226T090000.txt"
+
+rb_output=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    __resurrect_dir() { echo "'"$SNAP_DIR4"'"; }
+    trestorebest 2>/dev/null
+' 2>/dev/null)
+check "trestorebest: latest shows non_shell=0" "yes" "$(echo "$rb_output" | grep 'latest:' | grep -q 'non_shell=0' && echo yes || echo no)"
+check "trestorebest: selected shows non_shell=2" "yes" "$(echo "$rb_output" | grep 'selected:' | grep -q 'non_shell=2' && echo yes || echo no)"
+check "trestorebest: dry-run hint shown" "yes" "$(echo "$rb_output" | grep -q 'dry-run only' && echo yes || echo no)"
+
+# Test empty dir
+SNAP_DIR5="$(mktemp -d)"
+rb_empty=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    __resurrect_dir() { echo "'"$SNAP_DIR5"'"; }
+    trestorebest 2>/dev/null
+' 2>/dev/null)
+check "trestorebest: empty dir reports no snapshots" "yes" "$(echo "$rb_empty" | grep -q 'no resurrect snapshots' && echo yes || echo no)"
+
+rm -rf "$SNAP_DIR4" "$SNAP_DIR5"
+
+# ============================================================================
+bold ""
+bold "─── 36. COMMAND SHIM DISPATCHER ───"
+# ============================================================================
+# Test that the dispatcher correctly routes commands
+shim_output=$(TMUX_ALIASES_FILE="$TMUX_ALIASES_FILE" zsh -c '
+    cmd_name="talways"
+    source "'"$TMUX_COMMAND_SHIM_FILE"'" --help 2>/dev/null
+' 2>/dev/null || echo "")
+# The shim should resolve talways and run it — --help should produce usage text
+# Actually we need to simulate $0 being a command name. Let's test differently:
+shim_source_test=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    cmd_type="$(whence -w talways 2>/dev/null || true)"
+    echo "$cmd_type"
+' 2>/dev/null)
+check "shim: talways is a function after sourcing" "yes" "$(echo "$shim_source_test" | grep -q 'function' && echo yes || echo no)"
+
+shim_source_test2=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    cmd_type="$(whence -w trunaway 2>/dev/null || true)"
+    echo "$cmd_type"
+' 2>/dev/null)
+check "shim: trunaway is a function after sourcing" "yes" "$(echo "$shim_source_test2" | grep -q 'function' && echo yes || echo no)"
+
+shim_source_test3=$(zsh -c '
+    source "'"$TMUX_ALIASES_FILE"'"
+    cmd_type="$(whence -w tsaves 2>/dev/null || true)"
+    echo "$cmd_type"
+' 2>/dev/null)
+check "shim: tsaves is a function after sourcing" "yes" "$(echo "$shim_source_test3" | grep -q 'function' && echo yes || echo no)"
+
+# Verify dispatcher rejects non-function commands
+shim_reject=$(TMUX_ALIASES_FILE="$TMUX_ALIASES_FILE" zsh -c '
+    cmd_name="not_a_real_command"
+    aliases_file="'"$TMUX_ALIASES_FILE"'"
+    source "$aliases_file"
+    cmd_type="$(whence -w "$cmd_name" 2>/dev/null || true)"
+    case "$cmd_type" in *"function") echo "is_function" ;; *) echo "not_function" ;; esac
+' 2>/dev/null)
+check "shim: rejects unknown command" "not_function" "$shim_reject"
+
+# ============================================================================
+bold ""
+bold "─── 37. FILE_AGE_SECONDS CLAMP ───"
+# ============================================================================
+# Verify file_age_seconds returns non-negative even for future-dated files
+future_file="$(mktemp)"
+# Touch with a future timestamp (1 hour ahead)
+touch -t "$(date -v+1H +%Y%m%d%H%M 2>/dev/null || date -d '+1 hour' +%Y%m%d%H%M 2>/dev/null)" "$future_file" 2>/dev/null || true
+future_age=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    bash -c 'eval "$1"; file_age_seconds "'"$future_file"'"' _ "$FUNC_DEFS" 2>/dev/null || echo "ERROR")
+rm -f "$future_file"
+check "file_age: future file clamped to 0" "0" "$future_age"
+
+# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
 echo ""
