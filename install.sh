@@ -279,7 +279,7 @@ install_tmux_command_shims() {
     ln -sfn "$dispatcher_source" "$dispatcher_target"
 
     local cmd
-    for cmd in tgo tnew tprev tkill tkillc tprune trunaway thoston thostoff thoststatus gdrift gdriftfix tvpncheck tsshcheck tmoshdoctor tmosh; do
+    for cmd in tgo tnew tprev tkill tkillc tprune trunaway thoston thostoff thoststatus talways tsaves trestorebest gdrift gdriftfix tvpncheck tsshcheck tmoshdoctor tmosh; do
         local target="$shim_dir/$cmd"
         if [[ -e "$target" && ! -L "$target" ]]; then
             log_warn "Skipping command shim: $target exists and is not a symlink."

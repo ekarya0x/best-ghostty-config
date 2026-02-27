@@ -58,6 +58,12 @@ if ! [[ "$AUTO_FILL_SETTLE_SECONDS" =~ ^[0-9]+$ ]]; then
     AUTO_FILL_SETTLE_SECONDS=2
 fi
 readonly AUTO_FILL_SETTLE_SECONDS
+readonly RESTORE_FALLBACK_ON_EMPTY="${GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY:-1}"
+RESTORE_FALLBACK_MAX_AGE_DAYS="${GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS:-7}"
+if ! [[ "$RESTORE_FALLBACK_MAX_AGE_DAYS" =~ ^[0-9]+$ ]]; then
+    RESTORE_FALLBACK_MAX_AGE_DAYS=7
+fi
+readonly RESTORE_FALLBACK_MAX_AGE_DAYS
 readonly TRACE_ENABLED="${GHOSTTY_TMUX_TRACE:-0}"
 readonly TRACE_FILE="${GHOSTTY_TMUX_TRACE_FILE:-${STATE_DIR}/ghostty-tmux-${STATE_KEY}.trace.log}"
 
@@ -196,6 +202,80 @@ file_age_seconds() {
         mtime=$(stat -c%Y "$file" 2>/dev/null || echo "$now")
     fi
     echo $(( now - mtime ))
+}
+
+resurrect_snapshot_non_shell_panes() {
+    local file="$1"
+    [[ -f "$file" ]] || { echo "0"; return 0; }
+    awk -F '\t' '
+        /^pane/ {
+            cmd=$10
+            if (cmd != "zsh" && cmd != "bash" && cmd != "sh" && cmd != "fish" && cmd != "login" && cmd != "") {
+                count++
+            }
+        }
+        END { print count + 0 }
+    ' "$file" 2>/dev/null || echo "0"
+}
+
+resolve_last_resurrect_file() {
+    local save_link="$1"
+    if [[ -L "$save_link" ]]; then
+        local base dir target
+        dir="$(dirname "$save_link")"
+        base="$(readlink "$save_link" 2>/dev/null || true)"
+        if [[ -n "$base" && -f "$dir/$base" ]]; then
+            printf '%s\n' "$dir/$base"
+            return 0
+        fi
+    fi
+
+    if [[ -f "$save_link" ]]; then
+        printf '%s\n' "$save_link"
+        return 0
+    fi
+    return 1
+}
+
+select_resurrect_snapshot() {
+    local save_link="$1"
+    local latest_file=""
+    latest_file="$(resolve_last_resurrect_file "$save_link" || true)"
+    [[ -n "$latest_file" ]] || return 1
+
+    local latest_non_shell
+    latest_non_shell="$(resurrect_snapshot_non_shell_panes "$latest_file")"
+    if (( latest_non_shell > 0 )); then
+        printf '%s\n' "$latest_file"
+        return 0
+    fi
+
+    [[ "$RESTORE_FALLBACK_ON_EMPTY" == "1" ]] || {
+        printf '%s\n' "$latest_file"
+        return 0
+    }
+
+    local dir
+    dir="$(dirname "$latest_file")"
+    local max_age_seconds
+    max_age_seconds=$(( RESTORE_FALLBACK_MAX_AGE_DAYS * 86400 ))
+
+    local f age non_shell
+    while IFS= read -r f; do
+        [[ -f "$f" ]] || continue
+        age="$(file_age_seconds "$f")"
+        if (( age > max_age_seconds )); then
+            continue
+        fi
+        non_shell="$(resurrect_snapshot_non_shell_panes "$f")"
+        if (( non_shell > 0 )); then
+            trace_log "restore fallback latest=$(basename "$latest_file") selected=$(basename "$f") latest_non_shell=${latest_non_shell} selected_non_shell=${non_shell} age=${age}s"
+            printf '%s\n' "$f"
+            return 0
+        fi
+    done < <(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null || true)
+
+    printf '%s\n' "$latest_file"
 }
 
 BATCH_MODE=""
@@ -511,6 +591,18 @@ resurrect_restore_if_needed() {
     # Only restore when the server has no sessions (fresh start after reboot).
     if tmux_exec list-sessions 2>/dev/null | grep -q .; then
         return 0
+    fi
+
+    local selected_save
+    selected_save="$(select_resurrect_snapshot "$save_link" || true)"
+    if [[ -n "$selected_save" && -L "$save_link" ]]; then
+        local dir selected_base
+        dir="$(dirname "$save_link")"
+        selected_base="$(basename "$selected_save")"
+        if [[ "$(readlink "$save_link" 2>/dev/null || true)" != "$selected_base" ]]; then
+            ln -fs "$selected_base" "$save_link"
+            trace_log "restore switched_last=${selected_base}"
+        fi
     fi
 
     # Start a temporary session to bootstrap the tmux server so the

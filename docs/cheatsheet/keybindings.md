@@ -167,6 +167,9 @@ trunaway --apply    # guarded prune of runaway shell-only sessions
 thoston             # keep host awake (macOS)
 thoststatus         # show host-awake status
 thostoff            # disable host-awake mode
+talways on          # keep host awake + persistence reminder
+tsaves              # list resurrect snapshots with quality stats
+trestorebest        # pick best recent snapshot and restore (use --apply)
 tvpncheck host      # verify Tailscale reachability to host
 tsshcheck host      # verify plain SSH connectivity to host
 tmoshdoctor host    # check VPN path + remote mosh-server

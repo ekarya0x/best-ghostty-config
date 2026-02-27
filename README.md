@@ -54,7 +54,7 @@ The installer:
 - Installs tmux via Homebrew if missing
 - Installs TPM + tmux-resurrect + tmux-continuum
 - Symlinks config files with timestamped backups
-- Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`, `trunaway`, `thoston`, `tvpncheck`, `tsshcheck`, `tmosh`)
+- Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`, `trunaway`, `talways`, `thoston`, `tsaves`, `trestorebest`, `tvpncheck`, `tsshcheck`, `tmosh`)
 - Installs tmux command shims in PATH (`tkillc`, `trunaway`, etc.) for persistent-shell compatibility
 - Fixes the macOS Ctrl+Space input source conflict
 - Checks for JetBrains Mono
@@ -139,6 +139,8 @@ A **claimed-sessions file** tracks session assignments inside the current launch
 | `GHOSTTY_TMUX_AUTO_FILL_RESTORE` | `0` | Auto-open extra Ghostty tabs in restore mode (opt-in) |
 | `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` | `12` | Safety cap for auto-fill tab creation during restore |
 | `GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS` | `2` | Quiet-period gate before auto-fill opens synthetic tabs |
+| `GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY` | `1` | If latest snapshot is shell-only, fallback to recent non-shell snapshot |
+| `GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS` | `7` | Max age window for fallback snapshot search |
 | `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/batch/pending/claimed/mode files |
 | `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
 | `GHOSTTY_TMUX_TRACE` | `0` | Enable launcher trace logging |
@@ -197,6 +199,9 @@ trunaway --apply    # guarded prune of runaway shell-only sessions
 thoston             # keep host awake (caffeinate, macOS)
 thoststatus         # show host-awake status
 thostoff            # disable host-awake mode
+talways on          # host-awake wrapper + persistence note
+tsaves              # list resurrect snapshots + non-shell quality
+trestorebest        # choose best recent snapshot (use --apply to restore)
 tvpncheck host      # verify Tailscale reachability to host
 tmoshdoctor host    # reachability + remote mosh-server check
 tmosh host          # connect over Mosh with preflight checks
@@ -212,16 +217,18 @@ Installer also creates command shims (`tkillc`, `trunaway`, etc.) in a PATH dire
 ```bash
 trunaway                                # dry-run only
 trunaway --apply                        # kill candidates
-trunaway --apply --min-index 12         # only main-12+
+trunaway --apply --min-index 6          # only main-6+
 trunaway --apply --max-age 1800         # only sessions newer than 30m
-trunaway --apply --all-ages             # ignore age guard
+trunaway --apply --all-ages             # ignore age guard (default behavior)
+trunaway --apply --include-main         # include base "main" session
 ```
 
 Candidate definition:
-- session name matches `main-N` with `N >= 10` (configurable)
+- session name matches `main-N` with `N >= 2` (configurable)
+- optional base-session include via `--include-main`
 - exactly 1 window and 1 pane
 - pane command is a shell (`zsh`/`bash`/`sh`/`fish`)
-- age under 2h by default (configurable)
+- any age by default; optional age guard via `--max-age`
 
 Default is always dry-run; `--apply` is required to kill.
 
@@ -247,6 +254,7 @@ For live tmux/Claude sessions from phone, the host must remain powered on and re
 ```bash
 thoston        # keep Mac awake with caffeinate
 thoststatus
+talways on     # wrapper around host-awake mode
 ```
 
 Then connect from phone via SSH and attach:
@@ -256,6 +264,8 @@ ssh user@host -t tmux attach -t main
 ```
 
 If the host is shut down, tmux is stopped. After reboot, resurrect restores from snapshots, but processes are not continuously running during power-off.
+
+For true persistence while your Mac is powered off, run tmux/Claude on an always-on remote machine (home server/VPS) and connect from Ghostty/phone via Tailscale + SSH/Mosh.
 
 ### Tailscale + Mosh reachability plan
 
@@ -284,6 +294,16 @@ Notes:
 - `tmosh` runs preflight by default; `--no-check` skips it.
 - Mosh defaults to UDP ports `60000:61000` unless overridden (`tmosh --port ...`).
 - References: [tailscale CLI](https://tailscale.com/kb/1080/cli), [tailscale ping types](https://tailscale.com/kb/1465/ping-types), [mosh docs](https://mosh.org/).
+
+### Snapshot Recovery (after OS updates/reboots)
+
+When latest resurrect save is shell-only, inspect and restore a better snapshot:
+
+```bash
+tsaves
+trestorebest            # dry-run
+trestorebest --apply    # restore selected snapshot
+```
 
 ### Named project sessions
 
@@ -506,7 +526,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 172 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, alias safety, command shim wiring, and launch latency benchmarks. Does not touch live sessions.
+Runs 178 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, alias safety, command shim wiring, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -518,7 +538,7 @@ best-ghostty-config/
   tmux-command-shim.zsh command shim dispatcher for PATH-based helpers
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             172-assertion test suite
+  test.sh             178-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

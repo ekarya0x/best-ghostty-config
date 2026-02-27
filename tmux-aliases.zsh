@@ -152,9 +152,10 @@ tprune() {
 
 trunaway() {
     local apply=0
-    local min_index="${TRUNAWAY_MIN_INDEX:-10}"
+    local min_index="${TRUNAWAY_MIN_INDEX:-2}"
     local max_age_seconds="${TRUNAWAY_MAX_AGE_SECONDS:-7200}"
-    local all_ages=0
+    local all_ages=1
+    local include_main="${TRUNAWAY_INCLUDE_MAIN:-0}"
 
     while (( $# > 0 )); do
         case "$1" in
@@ -168,20 +169,26 @@ trunaway() {
             --max-age)
                 shift
                 max_age_seconds="${1:-}"
+                all_ages=0
                 ;;
             --all-ages)
                 all_ages=1
                 ;;
+            --include-main)
+                include_main=1
+                ;;
             -h|--help)
                 cat <<'EOF'
-usage: trunaway [--apply] [--min-index N] [--max-age SECONDS] [--all-ages]
+usage: trunaway [--apply] [--min-index N] [--max-age SECONDS] [--all-ages] [--include-main]
 
 Finds "runaway-style" tmux sessions and optionally kills them.
 Candidate rules:
-  - session name is main-N (N >= min-index, default 10)
+  - session name is main-N (N >= min-index, default 2)
+  - optional: include base session "main" with --include-main
   - exactly 1 window and 1 pane
   - pane command is a shell (zsh/bash/sh/fish)
-  - age <= max-age (default 7200 seconds), unless --all-ages
+  - by default: any age
+  - with --max-age: age <= max-age seconds (unless --all-ages)
 
 Default is dry-run. Add --apply to actually kill candidates.
 EOF
@@ -197,17 +204,26 @@ EOF
 
     [[ "$min_index" == <-> ]] || { echo "invalid --min-index: $min_index"; return 1; }
     [[ "$max_age_seconds" == <-> ]] || { echo "invalid --max-age: $max_age_seconds"; return 1; }
+    [[ "$include_main" == "0" || "$include_main" == "1" ]] || { echo "invalid include_main: $include_main"; return 1; }
 
     local now
     now="$(date +%s)"
     local -a candidates
-    local session windows created attached idx pane_count cmd age key
+    local session windows created attached idx pane_count cmd age key match_main
 
     while IFS='|' read -r session windows created attached; do
-        [[ "$session" == main-* ]] || continue
-        idx="${session#main-}"
-        [[ "$idx" == <-> ]] || continue
-        (( idx >= min_index )) || continue
+        match_main=0
+        idx=0
+        if [[ "$session" == "main" ]]; then
+            (( include_main == 1 )) || continue
+            match_main=1
+        elif [[ "$session" == main-* ]]; then
+            idx="${session#main-}"
+            [[ "$idx" == <-> ]] || continue
+            (( idx >= min_index )) || continue
+        else
+            continue
+        fi
         [[ "$windows" == "1" ]] || continue
 
         pane_count="$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null | wc -l | tr -d '[:space:]')"
@@ -228,12 +244,18 @@ EOF
             continue
         fi
 
-        key="$(printf '%06d' "$idx")"
+        if (( match_main == 1 )); then
+            key="000000"
+        else
+            key="$(printf '%06d' "$idx")"
+        fi
         candidates+=("${key}|${session}|${attached}|${cmd}|${age}")
     done < <(tmux ls -F '#{session_name}|#{session_windows}|#{session_created}|#{session_attached}' 2>/dev/null)
 
     if (( ${#candidates[@]} == 0 )); then
         echo "no runaway-style session candidates found"
+        echo "hint: include older/base sessions with:"
+        echo "  trunaway --apply --all-ages --min-index 2 --include-main"
         return 0
     fi
 
@@ -319,6 +341,183 @@ thoststatus() {
     fi
     echo "host-awake stale pid file"
     return 1
+}
+
+talways() {
+    local sub="${1:-status}"
+    case "$sub" in
+        on)
+            thoston
+            echo "note: local persistence requires host power. for true power-off persistence, run tmux on an always-on remote host."
+            ;;
+        off)
+            thostoff
+            ;;
+        status)
+            thoststatus
+            ;;
+        -h|--help|help)
+            cat <<'EOF'
+usage: talways [on|off|status]
+
+Wrapper around host-awake controls.
+Important: if this Mac is physically powered off, local tmux cannot keep running.
+Use an always-on remote machine for true power-off persistence.
+EOF
+            ;;
+        *)
+            echo "unknown subcommand: $sub"
+            echo "usage: talways [on|off|status]"
+            return 1
+            ;;
+    esac
+}
+
+__resurrect_dir() {
+    local from_tmux=""
+    from_tmux="$(tmux show -gv @resurrect-dir 2>/dev/null || true)"
+    if [[ -n "$from_tmux" && -d "$from_tmux" ]]; then
+        echo "$from_tmux"
+        return 0
+    fi
+
+    local xdg_dir="${XDG_DATA_HOME:-$HOME/.local/share}/tmux/resurrect"
+    if [[ -d "$xdg_dir" ]]; then
+        echo "$xdg_dir"
+        return 0
+    fi
+
+    local legacy_dir="$HOME/.tmux/resurrect"
+    if [[ -d "$legacy_dir" ]]; then
+        echo "$legacy_dir"
+        return 0
+    fi
+    return 1
+}
+
+__snapshot_non_shell_count() {
+    local file="$1"
+    awk -F '\t' '
+        /^pane/ {
+            cmd=$10
+            if (cmd != "zsh" && cmd != "bash" && cmd != "sh" && cmd != "fish" && cmd != "login" && cmd != "") {
+                count++
+            }
+        }
+        END { print count + 0 }
+    ' "$file" 2>/dev/null || echo "0"
+}
+
+tsaves() {
+    local dir
+    dir="$(__resurrect_dir)" || { echo "resurrect directory not found"; return 1; }
+
+    local -a files
+    files=("${(@f)$(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null)}")
+    if (( ${#files[@]} == 0 )); then
+        echo "no resurrect snapshots found in $dir"
+        return 0
+    fi
+
+    echo "resurrect snapshots ($dir):"
+    local f panes non_shell sessions ts
+    for f in "${files[@]}"; do
+        panes="$(awk -F '\t' '/^pane/ {c++} END {print c+0}' "$f" 2>/dev/null)"
+        non_shell="$(__snapshot_non_shell_count "$f")"
+        sessions="$(awk -F '\t' '/^pane/ {s[$2]=1} END {print length(s)+0}' "$f" 2>/dev/null)"
+        ts="$(basename "$f")"
+        printf '  %s panes=%s non_shell=%s sessions=%s\n' "$ts" "$panes" "$non_shell" "$sessions"
+    done
+}
+
+trestorebest() {
+    local apply=0
+    local max_age_days="${TRESTOREBEST_MAX_AGE_DAYS:-7}"
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --apply)
+                apply=1
+                ;;
+            --max-age-days)
+                shift
+                max_age_days="${1:-}"
+                ;;
+            -h|--help)
+                cat <<'EOF'
+usage: trestorebest [--apply] [--max-age-days N]
+
+Selects the best resurrect snapshot:
+  1) newest snapshot with non-shell workloads
+  2) fallback to latest snapshot if no better candidate exists
+
+Default is dry-run; --apply repoints "last" and runs restore.sh.
+EOF
+                return 0
+                ;;
+            *)
+                echo "unknown option: $1"
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    [[ "$max_age_days" == <-> ]] || { echo "invalid --max-age-days: $max_age_days"; return 1; }
+
+    local dir
+    dir="$(__resurrect_dir)" || { echo "resurrect directory not found"; return 1; }
+
+    local -a files
+    files=("${(@f)$(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null)}")
+    if (( ${#files[@]} == 0 )); then
+        echo "no resurrect snapshots found in $dir"
+        return 1
+    fi
+
+    local latest="${files[1]}"
+    local selected="$latest"
+    local latest_non_shell selected_non_shell age now
+    latest_non_shell="$(__snapshot_non_shell_count "$latest")"
+    selected_non_shell="$latest_non_shell"
+    now="$(date +%s)"
+    local max_age_seconds=$(( max_age_days * 86400 ))
+
+    if (( latest_non_shell == 0 )); then
+        local f mtime
+        for f in "${files[@]}"; do
+            mtime=0
+            if [[ "$(uname)" == "Darwin" ]]; then
+                mtime="$(stat -f%m "$f" 2>/dev/null || echo 0)"
+            else
+                mtime="$(stat -c%Y "$f" 2>/dev/null || echo 0)"
+            fi
+            age=$(( now - mtime ))
+            (( age < 0 )) && age=0
+            (( age <= max_age_seconds )) || continue
+
+            selected_non_shell="$(__snapshot_non_shell_count "$f")"
+            if (( selected_non_shell > 0 )); then
+                selected="$f"
+                break
+            fi
+        done
+    fi
+
+    echo "latest:   $(basename "$latest") non_shell=$latest_non_shell"
+    echo "selected: $(basename "$selected") non_shell=$selected_non_shell"
+
+    if (( apply == 0 )); then
+        echo "dry-run only. run with --apply to restore selected snapshot."
+        return 0
+    fi
+
+    local restore_script="$HOME/.tmux/plugins/tmux-resurrect/scripts/restore.sh"
+    [[ -x "$restore_script" ]] || { echo "restore script not found: $restore_script"; return 1; }
+
+    ln -fs "$(basename "$selected")" "$dir/last"
+    TMUX="" "$restore_script"
+    echo "restore complete from $(basename "$selected")"
 }
 
 gdrift() {
