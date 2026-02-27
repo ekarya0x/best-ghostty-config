@@ -408,13 +408,24 @@ __snapshot_non_shell_count() {
     ' "$file" 2>/dev/null || echo "0"
 }
 
+__resurrect_snapshot_files() {
+    local dir="$1"
+    local -a files
+    files=("${(@f)$(find "$dir" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' -print 2>/dev/null | LC_ALL=C sort -r)}")
+    # zsh (@f) on empty output produces ("") not (); check first element.
+    if (( ${#files[@]} == 0 )) || [[ -z "${files[1]}" ]]; then
+        return 1
+    fi
+
+    printf '%s\n' "${files[@]}"
+}
+
 tsaves() {
     local dir
     dir="$(__resurrect_dir)" || { echo "resurrect directory not found"; return 1; }
 
     local -a files
-    files=("${(@f)$(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null)}")
-    # zsh (@f) on empty output produces ("") not (); check first element.
+    files=("${(@f)$(__resurrect_snapshot_files "$dir" 2>/dev/null || true)}")
     if (( ${#files[@]} == 0 )) || [[ -z "${files[1]}" ]]; then
         echo "no resurrect snapshots found in $dir"
         return 0
@@ -470,8 +481,7 @@ EOF
     dir="$(__resurrect_dir)" || { echo "resurrect directory not found"; return 1; }
 
     local -a files
-    files=("${(@f)$(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null)}")
-    # zsh (@f) on empty output produces ("") not (); check first element.
+    files=("${(@f)$(__resurrect_snapshot_files "$dir" 2>/dev/null || true)}")
     if (( ${#files[@]} == 0 )) || [[ -z "${files[1]}" ]]; then
         echo "no resurrect snapshots found in $dir"
         return 1

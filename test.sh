@@ -846,6 +846,15 @@ ts_empty=$(zsh -c '
 ' 2>/dev/null)
 check "tsaves: empty dir reports no snapshots" "yes" "$(echo "$ts_empty" | grep -q 'no resurrect snapshots' && echo yes || echo no)"
 
+# Test tsaves under default zsh nomatch behavior (zsh -f should not emit glob errors)
+ts_nomatch=$(zsh -fc '
+    source "'"$TMUX_ALIASES_FILE"'"
+    d="'"$SNAP_DIR3"'"
+    __resurrect_dir() { echo "$d"; }
+    tsaves
+' 2>&1)
+check "tsaves: no nomatch glob error" "no" "$(echo "$ts_nomatch" | grep -q 'no matches found' && echo yes || echo no)"
+
 rm -rf "$SNAP_DIR2" "$SNAP_DIR3"
 
 # ============================================================================
@@ -886,6 +895,15 @@ rb_empty=$(zsh -c '
     trestorebest 2>/dev/null
 ' 2>/dev/null)
 check "trestorebest: empty dir reports no snapshots" "yes" "$(echo "$rb_empty" | grep -q 'no resurrect snapshots' && echo yes || echo no)"
+
+# Test trestorebest under default zsh nomatch behavior (zsh -f should not emit glob errors)
+rb_nomatch=$(zsh -fc '
+    source "'"$TMUX_ALIASES_FILE"'"
+    d="'"$SNAP_DIR5"'"
+    __resurrect_dir() { echo "$d"; }
+    trestorebest
+' 2>&1 || true)
+check "trestorebest: no nomatch glob error" "no" "$(echo "$rb_nomatch" | grep -q 'no matches found' && echo yes || echo no)"
 
 rm -rf "$SNAP_DIR4" "$SNAP_DIR5"
 
