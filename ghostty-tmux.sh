@@ -14,6 +14,11 @@ readonly SOCKET_NAME="${GHOSTTY_TMUX_SOCKET_NAME:-}"
 readonly NO_ATTACH="${GHOSTTY_TMUX_NO_ATTACH:-0}"
 readonly FORCE_NEW_SESSION="${GHOSTTY_TMUX_FORCE_NEW_SESSION:-0}"
 readonly AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"
+AUTO_FILL_RESTORE_MAX_TABS="${GHOSTTY_TMUX_AUTO_FILL_MAX_TABS:-6}"
+if ! [[ "$AUTO_FILL_RESTORE_MAX_TABS" =~ ^[0-9]+$ ]]; then
+    AUTO_FILL_RESTORE_MAX_TABS=6
+fi
+readonly AUTO_FILL_RESTORE_MAX_TABS
 readonly STATE_DIR="${GHOSTTY_TMUX_STATE_DIR:-/tmp}"
 STATE_KEY="${GHOSTTY_TMUX_STATE_KEY:-$(id -u)-${SOCKET_NAME:-default}-${BASE_SESSION}}"
 STATE_KEY="$(printf '%s' "$STATE_KEY" | tr -c 'A-Za-z0-9._-' '_')"
@@ -284,6 +289,10 @@ fill_restore_tabs_if_needed() {
     [[ "$NO_ATTACH" == "1" ]] && return 0
     [[ "$BATCH_MODE" == "restore" ]] || return 0
     [[ "$AUTO_FILL_RESTORE" == "1" ]] || return 0
+    if (( AUTO_FILL_RESTORE_MAX_TABS == 0 )); then
+        trace_log "fill skip=max_tabs=0"
+        return 0
+    fi
 
     # Run at most once per launch burst.
     if [[ -f "$FILL_MARK_FILE" ]]; then
@@ -306,7 +315,7 @@ fill_restore_tabs_if_needed() {
         # Let Ghostty finish launching its own restored tabs first.
         sleep 1.0
         local iter=0
-        while (( iter < 120 )); do
+        while (( iter < AUTO_FILL_RESTORE_MAX_TABS )); do
             acquire_lock
             local missing
             missing="$(count_unclaimed_unattached_sessions)"
@@ -326,9 +335,9 @@ fill_restore_tabs_if_needed() {
                 exit 0
             fi
             iter=$((iter + 1))
-            sleep 0.2
+            sleep 0.25
         done
-        trace_log "fill stop=max_iter"
+        trace_log "fill stop=max_tabs opened=${iter} max=${AUTO_FILL_RESTORE_MAX_TABS}"
     ) >/dev/null 2>&1 &
 }
 
@@ -483,7 +492,7 @@ ensure_batch_initialized
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
 pending=$((pending + 1))
 echo "$pending" > "$PENDING_FILE"
-trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION} auto_fill=${AUTO_FILL_RESTORE}"
+trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NEW_SESSION} auto_fill=${AUTO_FILL_RESTORE} auto_fill_max=${AUTO_FILL_RESTORE_MAX_TABS}"
 
 # 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
 #    saved snapshot, restore it now before making any session decisions.

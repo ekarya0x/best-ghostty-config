@@ -320,3 +320,179 @@ thoststatus() {
     echo "host-awake stale pid file"
     return 1
 }
+
+gdrift() {
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "not inside a git repository"
+        return 1
+    fi
+
+    local hidden
+    hidden="$(git ls-files -v | awk '$1 ~ /^[a-z]/ { print $2 }')"
+    if [[ -z "$hidden" ]]; then
+        echo "no hidden assume-unchanged entries"
+        return 0
+    fi
+
+    echo "hidden assume-unchanged entries:"
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        printf '  %s\n' "$path"
+    done <<< "$hidden"
+}
+
+gdriftfix() {
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "not inside a git repository"
+        return 1
+    fi
+
+    local hidden
+    hidden="$(git ls-files -v | awk '$1 ~ /^[a-z]/ { print $2 }')"
+    if [[ -z "$hidden" ]]; then
+        echo "no hidden assume-unchanged entries"
+        return 0
+    fi
+
+    local path
+    local count=0
+    while IFS= read -r path; do
+        [[ -n "$path" ]] || continue
+        git update-index --no-assume-unchanged -- "$path"
+        count=$((count + 1))
+    done <<< "$hidden"
+
+    echo "cleared assume-unchanged on ${count} file(s)"
+}
+
+tvpncheck() {
+    local target="${1:-}"
+    if [[ -z "$target" ]]; then
+        cat <<'EOF'
+usage: tvpncheck <tailscale-host-or-ip>
+
+Checks:
+  1) local Tailscale daemon/session
+  2) TSMP reachability to target
+  3) peer path/latency to target
+EOF
+        return 1
+    fi
+
+    command -v tailscale >/dev/null 2>&1 || { echo "tailscale CLI not found"; return 1; }
+
+    echo "[1/3] local tailscale status"
+    if ! tailscale status --self; then
+        echo "tailscale status failed (is tailscaled running and logged in?)"
+        return 1
+    fi
+
+    echo "[2/3] TSMP reachability: $target"
+    if ! tailscale ping --tsmp -c 2 "$target"; then
+        echo "TSMP reachability failed for $target"
+        return 1
+    fi
+
+    echo "[3/3] peer path and latency: $target"
+    if ! tailscale ping -c 2 "$target"; then
+        echo "peer ping failed for $target"
+        return 1
+    fi
+
+    echo "vpn reachability OK: $target"
+}
+
+tmoshdoctor() {
+    local target="${1:-}"
+    if [[ -z "$target" ]]; then
+        echo "usage: tmoshdoctor <tailscale-host-or-ip>"
+        return 1
+    fi
+
+    command -v ssh >/dev/null 2>&1 || { echo "ssh not found"; return 1; }
+    command -v mosh >/dev/null 2>&1 || { echo "mosh not found"; return 1; }
+
+    tvpncheck "$target" || return 1
+
+    echo "[4/4] remote mosh-server check"
+    if ssh -o BatchMode=yes -o ConnectTimeout=5 "$target" 'command -v mosh-server >/dev/null'; then
+        echo "remote mosh-server found"
+        return 0
+    fi
+    echo "remote mosh-server missing/unreachable via non-interactive ssh"
+    return 1
+}
+
+tmosh() {
+    local do_check=1
+    local ssh_cmd="${TMOSH_SSH_CMD:-ssh}"
+    local udp_port=""
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --no-check)
+                do_check=0
+                shift
+                ;;
+            --ssh)
+                shift
+                ssh_cmd="${1:-}"
+                [[ -n "$ssh_cmd" ]] || { echo "missing value for --ssh"; return 1; }
+                shift
+                ;;
+            --port)
+                shift
+                udp_port="${1:-}"
+                [[ "$udp_port" == <-> ]] || { echo "invalid --port: $udp_port"; return 1; }
+                shift
+                ;;
+            -h|--help)
+                cat <<'EOF'
+usage: tmosh [--no-check] [--ssh "ssh ..."] [--port UDP_PORT] <tailscale-host-or-ip> [-- remote-command...]
+
+Examples:
+  tmosh mac-mini.tailnet.ts.net
+  tmosh --port 60001 devbox
+  tmosh devbox -- ssh-agent zsh -lc 'tmux attach -t main'
+EOF
+                return 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                echo "unknown option: $1"
+                return 1
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    local target="${1:-}"
+    if [[ -z "$target" ]]; then
+        echo "usage: tmosh <tailscale-host-or-ip> [-- remote-command...]"
+        return 1
+    fi
+    shift
+
+    command -v mosh >/dev/null 2>&1 || { echo "mosh not found"; return 1; }
+
+    if (( do_check == 1 )); then
+        tvpncheck "$target" || return 1
+    fi
+
+    local -a cmd
+    cmd=(mosh --ssh="$ssh_cmd")
+    if [[ -n "$udp_port" ]]; then
+        cmd+=(-p "$udp_port")
+    fi
+    cmd+=("$target")
+    if (( $# > 0 )); then
+        cmd+=(-- "$@")
+    fi
+
+    "${cmd[@]}"
+}

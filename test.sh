@@ -99,12 +99,18 @@ check_ok "tmux-aliases.zsh: zsh -n syntax" zsh -n "$TMUX_ALIASES_FILE"
 shebang=$(head -1 "$SCRIPT")
 check "shebang is #!/usr/bin/env bash" "#!/usr/bin/env bash" "$shebang"
 check_ok "auto-fill restore default present" grep -q 'AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"' "$SCRIPT"
+check_ok "auto-fill max tabs default present" grep -q 'AUTO_FILL_RESTORE_MAX_TABS="${GHOSTTY_TMUX_AUTO_FILL_MAX_TABS:-6}"' "$SCRIPT"
 
 check "tmux-aliases: normalize numeric target" "main-6" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; __tmux_normalize_target 6')"
 check_ok "tmux-aliases: has trunaway()" grep -q '^trunaway()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: trunaway dry-run guard" grep -q 'dry-run only\. run with --apply to kill these sessions\.' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has thoston()" grep -q '^thoston()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has thostoff()" grep -q '^thostoff()' "$TMUX_ALIASES_FILE"
+check_ok "tmux-aliases: has gdrift()" grep -q '^gdrift()' "$TMUX_ALIASES_FILE"
+check_ok "tmux-aliases: has gdriftfix()" grep -q '^gdriftfix()' "$TMUX_ALIASES_FILE"
+check_ok "tmux-aliases: has tvpncheck()" grep -q '^tvpncheck()' "$TMUX_ALIASES_FILE"
+check_ok "tmux-aliases: has tmosh()" grep -q '^tmosh()' "$TMUX_ALIASES_FILE"
+check_ok "tmux-aliases: has tmoshdoctor()" grep -q '^tmoshdoctor()' "$TMUX_ALIASES_FILE"
 
 # ============================================================================
 bold ""

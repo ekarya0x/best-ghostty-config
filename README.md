@@ -23,7 +23,7 @@ Ghostty + tmux. Persistent sessions, independent tabs, Catppuccin theme, sane de
 └───────────────────────────────────────────────────────────┘
 ```
 
-Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking plus per-burst claim tracking: restart restores reattach existing detached sessions, normal interactive tab/pane/window creation gets fresh sessions, and optional restore fill can open extra Ghostty tabs when explicitly enabled.
+Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking plus per-burst claim tracking: restart restores reattach existing detached sessions, normal interactive tab/pane/window creation gets fresh sessions, and optional restore fill can open extra Ghostty tabs when explicitly enabled and capped.
 
 ## Three layers of persistence
 
@@ -54,7 +54,7 @@ The installer:
 - Installs tmux via Homebrew if missing
 - Installs TPM + tmux-resurrect + tmux-continuum
 - Symlinks config files with timestamped backups
-- Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`)
+- Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`, `trunaway`, `thoston`, `tvpncheck`, `tmosh`)
 - Fixes the macOS Ctrl+Space input source conflict
 - Checks for JetBrains Mono
 - Reloads tmux if running
@@ -123,7 +123,7 @@ Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.m
 5. **Claim base once.** If there are zero clients and `main` is not yet claimed in this launch burst, claim and attach `main`.
 6. **Restore mode attach.** In restore mode, attach the next unattached unclaimed session (prefers `main-N`, then other names).
 7. **Normal mode / fallback.** If no reusable detached session remains, create the next `main-N`.
-8. **Optional restore tab fill.** If `GHOSTTY_TMUX_AUTO_FILL_RESTORE=1`, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs.
+8. **Optional restore tab fill.** If `GHOSTTY_TMUX_AUTO_FILL_RESTORE=1`, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs. Fill is capped by `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` (default `6`) to prevent runaway tab storms.
 
 A **claimed-sessions file** tracks session assignments inside the current launch burst. This prevents the race where instance N releases the lock before `exec tmux attach` has fully registered a client.
 
@@ -136,6 +136,7 @@ A **claimed-sessions file** tracks session assignments inside the current launch
 | `GHOSTTY_TMUX_NO_ATTACH` | `0` | Print session name instead of attaching |
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
 | `GHOSTTY_TMUX_AUTO_FILL_RESTORE` | `0` | Auto-open extra Ghostty tabs in restore mode (opt-in) |
+| `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` | `6` | Safety cap for auto-fill tab creation during restore |
 | `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/batch/pending/claimed/mode files |
 | `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
 | `GHOSTTY_TMUX_TRACE` | `0` | Enable launcher trace logging |
@@ -194,6 +195,11 @@ trunaway --apply    # guarded prune of runaway shell-only sessions
 thoston             # keep host awake (caffeinate, macOS)
 thoststatus         # show host-awake status
 thostoff            # disable host-awake mode
+tvpncheck host      # verify Tailscale reachability to host
+tmoshdoctor host    # reachability + remote mosh-server check
+tmosh host          # connect over Mosh with preflight checks
+gdrift              # list hidden assume-unchanged files
+gdriftfix           # clear assume-unchanged flags in current repo
 ```
 
 ### Guarded runaway cleanup
@@ -214,6 +220,14 @@ Candidate definition:
 
 Default is always dry-run; `--apply` is required to kill.
 
+### What "restore auto-fill is opt-in only" means
+
+- By default (`GHOSTTY_TMUX_AUTO_FILL_RESTORE=0`), launcher never opens extra Ghostty tabs on its own.
+- When enabled (`=1`), it may open additional tabs only during restore mode to reattach detached sessions.
+- Auto-fill now has a hard safety cap (`GHOSTTY_TMUX_AUTO_FILL_MAX_TABS`, default `6`) so one launch cannot spawn unlimited tabs.
+
+Recommended: leave auto-fill off unless you explicitly want "all detached sessions get tabs on relaunch."
+
 ### Always-on host + phone access
 
 For live tmux/Claude sessions from phone, the host must remain powered on and reachable.
@@ -230,6 +244,32 @@ ssh user@host -t tmux attach -t main
 ```
 
 If the host is shut down, tmux is stopped. After reboot, resurrect restores from snapshots, but processes are not continuously running during power-off.
+
+### Tailscale + Mosh reachability plan
+
+Use this when you want low-latency mobile access to live tmux sessions over your tailnet.
+
+```bash
+# on host and client
+brew install tailscale mosh
+
+# keep host awake
+thoston
+
+# preflight reachability
+tvpncheck your-host.tailnet.ts.net
+tmoshdoctor your-host.tailnet.ts.net
+
+# attach to tmux over mosh
+tmosh your-host.tailnet.ts.net -- tmux attach -t main
+```
+
+Notes:
+- `tvpncheck` runs local status + `tailscale ping --tsmp` + peer ping.
+- `tmoshdoctor` adds a remote `mosh-server` presence check via non-interactive SSH.
+- `tmosh` runs preflight by default; `--no-check` skips it.
+- Mosh defaults to UDP ports `60000:61000` unless overridden (`tmosh --port ...`).
+- References: [tailscale CLI](https://tailscale.com/kb/1080/cli), [tailscale ping types](https://tailscale.com/kb/1465/ping-types), [mosh docs](https://mosh.org/).
 
 ### Named project sessions
 
@@ -445,7 +485,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 156 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 162 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, alias safety, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -456,7 +496,7 @@ best-ghostty-config/
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             156-assertion test suite
+  test.sh             162-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

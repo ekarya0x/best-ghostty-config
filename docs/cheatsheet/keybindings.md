@@ -167,6 +167,11 @@ trunaway --apply    # guarded prune of runaway shell-only sessions
 thoston             # keep host awake (macOS)
 thoststatus         # show host-awake status
 thostoff            # disable host-awake mode
+tvpncheck host      # verify Tailscale reachability to host
+tmoshdoctor host    # check VPN path + remote mosh-server
+tmosh host          # connect over Mosh with preflight checks
+gdrift              # list hidden assume-unchanged files
+gdriftfix           # clear hidden assume-unchanged files
 ```
 
 ---
