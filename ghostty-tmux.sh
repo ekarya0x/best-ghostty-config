@@ -43,6 +43,7 @@ fi
 # stable even when Ghostty restore tabs arrive a few seconds apart.
 # ---------------------------------------------------------------------------
 readonly LOCK_DIR="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.lock"
+readonly LOCK_OWNER_FILE="${LOCK_DIR}/owner"
 readonly BATCH_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.batch"
 readonly PENDING_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.pending"
 readonly CLAIMED_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.claimed"
@@ -132,16 +133,27 @@ tmux_session_count() {
 # Locking helpers
 # ---------------------------------------------------------------------------
 acquire_lock() {
-    local attempts=0
     while ! mkdir "$LOCK_DIR" 2>/dev/null; do
-        attempts=$((attempts + 1))
-        # After ~LOCK_STALE_SECONDS, assume the holder died and force-remove.
-        if (( attempts > LOCK_STALE_SECONDS * 20 )); then
+        local owner_pid lock_age
+        owner_pid="$(awk 'NR==1 { print $1 }' "$LOCK_OWNER_FILE" 2>/dev/null || true)"
+
+        # If the lock holder is still alive, wait without reclaiming.
+        if [[ "$owner_pid" =~ ^[0-9]+$ ]] && kill -0 "$owner_pid" 2>/dev/null; then
+            sleep 0.05
+            continue
+        fi
+
+        # Reclaim only if the lock is old and there is no live holder.
+        lock_age="$(file_age_seconds "$LOCK_DIR")"
+        if (( lock_age > LOCK_STALE_SECONDS )); then
+            trace_log "lock reclaim age=${lock_age}s owner_pid=${owner_pid:-none}"
             rm -rf "$LOCK_DIR" 2>/dev/null || true
-            attempts=0
+            sleep 0.01
+            continue
         fi
         sleep 0.05
     done
+    printf '%s %s\n' "$$" "$(date +%s)" > "$LOCK_OWNER_FILE" 2>/dev/null || true
 }
 
 release_lock() {

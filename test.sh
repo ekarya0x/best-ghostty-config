@@ -730,9 +730,13 @@ touch -t 202602261000 "$SNAP_DIR/tmux_resurrect_20260226T100000.txt"
 # Point "last" symlink at the shell-only (latest) snapshot
 ln -s "tmux_resurrect_20260227T120000.txt" "$SNAP_DIR/last"
 
-# Source only function definitions (before the main body starting at acquire_lock).
-# The script's main body (line 639+) creates sessions and execs — we only need functions.
-FUNC_DEFS="$(head -n 635 "$SCRIPT")"
+# Source only function definitions (before the main body that calls acquire_lock).
+# Use a marker lookup instead of a hardcoded line number so this stays stable
+# as helper functions are added above the main body.
+FUNC_DEFS="$(awk '
+    /^acquire_lock$/ { exit }
+    { print }
+' "$SCRIPT")"
 
 # Test resurrect_snapshot_non_shell_panes counts correctly
 shell_only_count=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
@@ -998,6 +1002,53 @@ snap_count=$(find "$SNAP_DIR6" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' 
 check "bash snapshot: find excludes 'last' symlink" "2" "$snap_count"
 
 rm -rf "$SNAP_DIR6"
+
+# ============================================================================
+bold ""
+bold "─── 39. LOCK OWNER LIVENESS GUARD ───"
+# ============================================================================
+wipe
+lock_owner_out="/tmp/bgc_lock_owner_${SOCKET}.out"
+rm -f "$lock_owner_out"
+mkdir -p "$LOCK_DIR"
+
+# Simulate an existing live lock owner and age the lock directory so stale-age
+# alone would trigger reclaim if owner liveness is ignored.
+sleep 10 &
+lock_owner_pid=$!
+printf '%s %s\n' "$lock_owner_pid" "$(date +%s)" > "$LOCK_DIR/owner"
+touch -t 202501010000 "$LOCK_DIR" 2>/dev/null || true
+
+GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 "$SCRIPT" > "$lock_owner_out" 2>/dev/null &
+runner_pid=$!
+
+sleep 2
+runner_waiting="no"
+if kill -0 "$runner_pid" 2>/dev/null; then
+    runner_waiting="yes"
+fi
+check "lock owner: live owner blocks premature reclaim" "yes" "$runner_waiting"
+
+kill "$lock_owner_pid" 2>/dev/null || true
+wait "$lock_owner_pid" 2>/dev/null || true
+
+runner_done="no"
+for _ in $(seq 1 120); do
+    if ! kill -0 "$runner_pid" 2>/dev/null; then
+        runner_done="yes"
+        break
+    fi
+    sleep 0.05
+done
+if [[ "$runner_done" == "yes" ]]; then
+    wait "$runner_pid" 2>/dev/null || true
+else
+    kill "$runner_pid" 2>/dev/null || true
+    wait "$runner_pid" 2>/dev/null || true
+fi
+check "lock owner: dead owner allows recovery" "yes" "$runner_done"
+check "lock owner: recovered launcher selects main" "main" "$(cat "$lock_owner_out" 2>/dev/null | tr -d '\r')"
+rm -f "$lock_owner_out"
 
 # ============================================================================
 # FINAL SUMMARY
