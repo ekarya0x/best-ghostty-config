@@ -20,6 +20,7 @@ PENDING_FILE="/tmp/ghostty-tmux-${STATE_KEY}.pending"
 CLAIMED_FILE="/tmp/ghostty-tmux-${STATE_KEY}.claimed"
 MODE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.mode"
 FILL_FILE="/tmp/ghostty-tmux-${STATE_KEY}.fill"
+FILL_MARK_FILE="/tmp/ghostty-tmux-${STATE_KEY}.fill-mark"
 TRACE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.trace.log"
 
 green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
@@ -54,7 +55,7 @@ check_ok() {
 
 wipe() {
     tmux -L "$SOCKET" kill-server 2>/dev/null || true
-    rm -rf "$LOCK_DIR" "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$TRACE_FILE"
+    rm -rf "$LOCK_DIR" "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE" "$TRACE_FILE"
 }
 
 trap 'wipe' EXIT
@@ -159,7 +160,7 @@ bold ""
 bold "─── 5. GHOSTTY RESTART (reattach to surviving sessions) ───"
 # ============================================================================
 # Sessions survive from test 4. Clear batch state to simulate fresh launch.
-rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "reattach: tab 1 → main" "main" "$r1"
 check "reattach: tab 2 → main-2" "main-2" "$r2"
@@ -171,7 +172,7 @@ check "reattach: no orphans (still 4)" "4" "$(sess_count)"
 bold ""
 bold "─── 6. DOUBLE RESTART (reattach twice in a row) ───"
 # ============================================================================
-rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "2nd reattach: tab 1 → main" "main" "$r1"
 check "2nd reattach: tab 2 → main-2" "main-2" "$r2"
@@ -223,7 +224,7 @@ check "gaps: tab 1 → main" "main" "$r1"
 check "gaps: tab 2 → main-3 (lowest unattached)" "main-3" "$r2"
 check "gaps: tab 3 → main-7 (next lowest)" "main-7" "$r3"
 # A 4th tab should create a new session, filling gap at main-2
-rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
 # Need to re-enter batch mode — start a fresh batch with existing 3 sessions
 wipe
 tmux -L "$SOCKET" new-session -d -s main
@@ -239,7 +240,7 @@ bold "─── 10. FORCE_NEW_SESSION ENV VAR ───"
 wipe
 run >/dev/null  # create base
 sleep 4
-rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
 check "force new: creates main-2" "main-2" "$r"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
@@ -582,7 +583,7 @@ wipe
 r1=$(run); r2=$(run); r3=$(run)
 # Wait for stale
 sleep 4
-rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
 # Single launch — pending resets to 1, but client_count=0 in NO_ATTACH
 # So it attaches to main (base). This is correct: a fresh single-tab launch
 # after sessions are running reuses the base.
@@ -625,7 +626,7 @@ dim "  Cold launch: ${cold_ms}ms"
 check "cold launch < 2500ms" "yes" "$( [[ "$cold_ms" != "N/A" && "$cold_ms" -lt 2500 ]] && echo yes || echo no)"
 
 # Warm sequential launch (session exists)
-rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
 t_start=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
 run >/dev/null
 t_end=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)

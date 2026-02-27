@@ -42,6 +42,7 @@ readonly PENDING_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.pending"
 readonly CLAIMED_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.claimed"
 readonly MODE_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.mode"
 readonly FILL_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.fill"
+readonly FILL_MARK_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.fill-mark"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 readonly BATCH_STALE_SECONDS=30
@@ -188,6 +189,14 @@ file_age_seconds() {
 
 BATCH_MODE=""
 set_batch_mode_if_needed() {
+    if [[ -f "$MODE_FILE" ]]; then
+        BATCH_MODE="$(cat "$MODE_FILE" 2>/dev/null || true)"
+    fi
+
+    if [[ "$BATCH_MODE" == "restore" || "$BATCH_MODE" == "normal" ]]; then
+        return 0
+    fi
+
     local session_count client_count
     session_count="$(tmux_session_count)"
     client_count="$(tmux_client_count)"
@@ -274,11 +283,18 @@ fill_restore_tabs_if_needed() {
     [[ "$NO_ATTACH" == "1" ]] && return 0
     [[ "$BATCH_MODE" == "restore" ]] || return 0
 
+    # Run at most once per launch burst.
+    if [[ -f "$FILL_MARK_FILE" ]]; then
+        trace_log "fill skip=already_marked"
+        return 0
+    fi
+
     # One helper per batch.
     if [[ -f "$FILL_FILE" ]]; then
         trace_log "fill skip=already_running"
         return 0
     fi
+    printf '%s\n' "$$" > "$FILL_MARK_FILE"
     printf '%s\n' "$$" > "$FILL_FILE"
     trace_log "fill start"
 
@@ -360,7 +376,7 @@ cleanup_stale_batch_files_if_needed() {
         batch_age="$(file_age_seconds "$BATCH_FILE")"
         if (( batch_age > BATCH_STALE_SECONDS )); then
             trace_log "cleanup stale_batch_epoch age=${batch_age}"
-            rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+            rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
         fi
     fi
 
@@ -390,6 +406,7 @@ ensure_batch_initialized() {
         : > "$BATCH_FILE"
         : > "$CLAIMED_FILE"
         echo "0" > "$PENDING_FILE"
+        rm -f "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE"
     elif [[ ! -f "$PENDING_FILE" ]]; then
         echo "0" > "$PENDING_FILE"
     fi
