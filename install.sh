@@ -9,8 +9,6 @@ readonly XDG_LAUNCHER="${XDG_CONFIG}/ghostty-tmux.sh"
 readonly DEFAULT_XDG_LAUNCHER="${DEFAULT_XDG_CONFIG}/ghostty-tmux.sh"
 readonly XDG_TMUX_ALIASES="${XDG_CONFIG}/tmux-aliases.zsh"
 readonly DEFAULT_XDG_TMUX_ALIASES="${DEFAULT_XDG_CONFIG}/tmux-aliases.zsh"
-readonly XDG_TMUX_REPL="${XDG_CONFIG}/tmux-repl.sh"
-readonly DEFAULT_XDG_TMUX_REPL="${DEFAULT_XDG_CONFIG}/tmux-repl.sh"
 
 log_info() { echo -e "\033[1;34m[INFO]\033[0m $1"; }
 log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
@@ -147,12 +145,6 @@ prepare_launcher_script() {
     chmod +x "$launcher_file"
 }
 
-prepare_tmux_repl_script() {
-    local repl_file="$REPO_DIR/tmux-repl.sh"
-    [[ -f "$repl_file" ]] || log_error "tmux REPL missing: $repl_file"
-    chmod +x "$repl_file"
-}
-
 validate_launcher_command_line() {
     local config_file="$REPO_DIR/config"
     local expected="command = ~/.config/ghostty/ghostty-tmux.sh"
@@ -202,15 +194,9 @@ link_tmux_aliases() {
     rm -f "$DEFAULT_XDG_CONFIG/dmux-aliases.zsh" "$XDG_CONFIG/dmux-aliases.zsh" 2>/dev/null || true
 }
 
-link_tmux_repl() {
-    local repl_source="$REPO_DIR/tmux-repl.sh"
-    [[ -f "$repl_source" ]] || return 0
-
-    link_file "$repl_source" "$DEFAULT_XDG_TMUX_REPL" "tmux repl (~/.config)"
-
-    if [[ "$XDG_TMUX_REPL" != "$DEFAULT_XDG_TMUX_REPL" ]]; then
-        link_file "$repl_source" "$XDG_TMUX_REPL" "tmux repl (XDG)"
-    fi
+remove_deprecated_files() {
+    # Legacy artifact from removed tmux REPL feature.
+    rm -f "$DEFAULT_XDG_CONFIG/tmux-repl.sh" "$XDG_CONFIG/tmux-repl.sh" 2>/dev/null || true
 }
 
 ensure_zsh_sources_tmux_aliases() {
@@ -312,14 +298,13 @@ main() {
     check_macos_ctrl_space
     install_tpm_plugins
     prepare_launcher_script
-    prepare_tmux_repl_script
     validate_launcher_command_line
 
     echo ""
     link_file "$REPO_DIR/config" "$XDG_CONFIG/config" "Ghostty (XDG)"
     link_launcher_paths
     link_tmux_aliases
-    link_tmux_repl
+    remove_deprecated_files
     handle_macos_app_support
     link_file "$REPO_DIR/tmux.conf" "$HOME/.tmux.conf" "tmux"
     ensure_zsh_sources_tmux_aliases

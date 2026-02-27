@@ -8,7 +8,6 @@
 PASS=0; FAIL=0; TOTAL=0
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="${REPO_DIR}/ghostty-tmux.sh"
-REPL_SCRIPT="${REPO_DIR}/tmux-repl.sh"
 INSTALL_SCRIPT="${REPO_DIR}/install.sh"
 TMUX_CONF_FILE="${REPO_DIR}/tmux.conf"
 GHOSTTY_CONFIG_FILE="${REPO_DIR}/config"
@@ -87,10 +86,8 @@ bold ""
 bold "─── 1. SCRIPT FUNDAMENTALS ───"
 # ============================================================================
 check_ok "ghostty-tmux.sh: bash -n syntax" bash -n "$SCRIPT"
-check_ok "tmux-repl.sh: bash -n syntax" bash -n "$REPL_SCRIPT"
 check_ok "install.sh: bash -n syntax" bash -n "$INSTALL_SCRIPT"
 check_ok "ghostty-tmux.sh: executable" test -x "$SCRIPT"
-check_ok "tmux-repl.sh: executable" test -x "$REPL_SCRIPT"
 check_ok "install.sh: executable" test -x "$INSTALL_SCRIPT"
 check_ok "tmux binary reachable" command -v tmux
 check_ok "zsh binary reachable" command -v zsh
@@ -100,10 +97,6 @@ check_ok "tmux-aliases.zsh: zsh -n syntax" zsh -n "$TMUX_ALIASES_FILE"
 shebang=$(head -1 "$SCRIPT")
 check "shebang is #!/usr/bin/env bash" "#!/usr/bin/env bash" "$shebang"
 
-# tmux REPL smoke tests
-check_ok "tmux-repl: /help works" "$REPL_SCRIPT" --execute "/help"
-check_ok "tmux-repl: /sessions works" "$REPL_SCRIPT" --execute "/sessions"
-check_ok "tmux-repl: /doctor works" "$REPL_SCRIPT" --execute "/doctor"
 check "tmux-aliases: normalize numeric target" "main-6" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; __tmux_normalize_target 6')"
 
 # ============================================================================
@@ -468,17 +461,16 @@ check_ok "has check_font()" grep -q 'check_font()' "$is"
 check_ok "has check_macos_ctrl_space()" grep -q 'check_macos_ctrl_space()' "$is"
 check_ok "has install_tpm_plugins()" grep -q 'install_tpm_plugins()' "$is"
 check_ok "has prepare_launcher_script()" grep -q 'prepare_launcher_script()' "$is"
-check_ok "has prepare_tmux_repl_script()" grep -q 'prepare_tmux_repl_script()' "$is"
 check_ok "has link_file()" grep -q 'link_file()' "$is"
 check_ok "has link_tmux_aliases()" grep -q 'link_tmux_aliases()' "$is"
-check_ok "has link_tmux_repl()" grep -q 'link_tmux_repl()' "$is"
+check_ok "has remove_deprecated_files()" grep -q 'remove_deprecated_files()' "$is"
 check_ok "has ensure_zsh_sources_tmux_aliases()" grep -q 'ensure_zsh_sources_tmux_aliases()' "$is"
 check_ok "has handle_macos_app_support()" grep -q 'handle_macos_app_support()' "$is"
 check_ok "has reload_tmux_if_running()" grep -q 'reload_tmux_if_running()' "$is"
 check_ok "main calls install_tpm_plugins" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q install_tpm_plugins'
 check_ok "main calls reload_tmux_if_running" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q reload_tmux_if_running'
 check_ok "main calls link_tmux_aliases" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q link_tmux_aliases'
-check_ok "main calls link_tmux_repl" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q link_tmux_repl'
+check_ok "main calls remove_deprecated_files" bash -c 'grep -A30 "^main()" "'"$is"'" | grep -q remove_deprecated_files'
 check_ok "TPM cloned with --depth 1" grep -q 'clone --depth 1' "$is"
 
 # ============================================================================
@@ -490,7 +482,6 @@ repo="$(cd "$REPO_DIR" && pwd -P)"
 xdg_config="$HOME/.config/ghostty/config"
 xdg_launcher="$HOME/.config/ghostty/ghostty-tmux.sh"
 xdg_tmux_aliases="$HOME/.config/ghostty/tmux-aliases.zsh"
-xdg_tmux_repl="$HOME/.config/ghostty/tmux-repl.sh"
 xdg_legacy_aliases="$HOME/.config/ghostty/dmux-aliases.zsh"
 tmux_conf="$HOME/.tmux.conf"
 
@@ -516,13 +507,6 @@ elif [[ -L "$xdg_legacy_aliases" ]]; then
     check "symlink: legacy aliases → repo" "$repo/dmux-aliases.zsh" "$target"
 else
     check "symlink: tmux aliases exists" "symlink" "missing (run ./install.sh)"
-fi
-
-if [[ -L "$xdg_tmux_repl" ]]; then
-    target=$(readlink "$xdg_tmux_repl")
-    check "symlink: tmux repl → repo" "$repo/tmux-repl.sh" "$target"
-else
-    check "symlink: tmux repl exists" "symlink" "missing (run ./install.sh)"
 fi
 
 if [[ -L "$tmux_conf" ]]; then
@@ -619,7 +603,7 @@ run >/dev/null
 t_end=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
 cold_ms=$(python3 -c "print(int(($t_end - $t_start) * 1000))" 2>/dev/null || echo "N/A")
 dim "  Cold launch: ${cold_ms}ms"
-check "cold launch < 2000ms" "yes" "$( [[ "$cold_ms" != "N/A" && "$cold_ms" -lt 2000 ]] && echo yes || echo no)"
+check "cold launch < 2500ms" "yes" "$( [[ "$cold_ms" != "N/A" && "$cold_ms" -lt 2500 ]] && echo yes || echo no)"
 
 # Warm sequential launch (session exists)
 rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"

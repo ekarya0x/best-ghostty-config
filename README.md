@@ -53,7 +53,6 @@ The installer:
 - Installs TPM + tmux-resurrect + tmux-continuum
 - Symlinks config files with timestamped backups
 - Installs tmux aliases (`tls`, `tgo`, `tprev`, `tkill`, `tprune`)
-- Installs tmux slash-command REPL (`trepl`)
 - Fixes the macOS Ctrl+Space input source conflict
 - Checks for JetBrains Mono
 - Reloads tmux if running
@@ -66,7 +65,6 @@ The installer:
 | `config` | `~/Library/Application Support/com.mitchellh.ghostty/config` |
 | `ghostty-tmux.sh` | `~/.config/ghostty/ghostty-tmux.sh` |
 | `tmux-aliases.zsh` | `~/.config/ghostty/tmux-aliases.zsh` |
-| `tmux-repl.sh` | `~/.config/ghostty/tmux-repl.sh` |
 | `tmux.conf` | `~/.tmux.conf` |
 
 ### Update
@@ -159,6 +157,22 @@ tmux switch-client -t main-2  # from inside tmux
 # or: prefix + s              # interactive session picker
 ```
 
+### Why tabs are named `main`, `main-2`, `main-3`
+
+- `main` is the configured base session name (`GHOSTTY_TMUX_BASE_SESSION`, default: `main`).
+- The first attached tab in a launch batch claims `main`.
+- Additional tabs get numeric suffixes (`main-2`, `main-3`, ...).
+- You can jump/kill with either full names (`main-6`) or numeric shorthand via aliases (`tgo 6`, `tkill 6`).
+
+### Fast visibility of everything
+
+```bash
+tls                 # sessions + attached flag + window count
+twin                # all windows across all sessions
+tpanes              # all panes with cwd + running command
+ttree               # interactive tree (sessions/windows/panes)
+```
+
 ### tmux aliases (installed by `install.sh`)
 
 ```bash
@@ -172,21 +186,6 @@ tprev               # switch to most recently used other session
 tkill main-3        # kill one session safely
 tkillc              # kill current session and hop to another
 tprune              # kill detached main-* sessions
-trepl               # interactive slash-command tmux REPL
-```
-
-### tmux REPL (`trepl`)
-
-```bash
-trepl
-# /help
-# /sessions
-# /tree
-# /choose       # requires fzf
-# /doctor
-# /trace on
-# /save
-# /restore
 ```
 
 ### Named project sessions
@@ -362,7 +361,6 @@ tmux show -gv prefix2    # C-a
 ls -la ~/.config/ghostty/config                                         # symlink → repo
 ls -la ~/.config/ghostty/ghostty-tmux.sh                                # symlink → repo
 ls -la ~/.config/ghostty/tmux-aliases.zsh                               # symlink → repo
-ls -la ~/.config/ghostty/tmux-repl.sh                                   # symlink → repo
 ls -la "$HOME/Library/Application Support/com.mitchellh.ghostty/config" # symlink → repo
 ls -la ~/.tmux.conf                                                     # symlink → repo
 ls -la ~/.tmux/plugins/tmux-resurrect/                                  # plugin installed
@@ -393,7 +391,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 155 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 148 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -402,10 +400,9 @@ best-ghostty-config/
   config              Ghostty settings + keybindings
   ghostty-tmux.sh     Session launcher — atomic locking, reattachment, resurrect restore
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
-  tmux-repl.sh        Interactive slash-command tmux REPL
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             155-assertion test suite
+  test.sh             148-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

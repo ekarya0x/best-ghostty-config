@@ -158,21 +158,10 @@ tgo main-2          # jump/attach
 tnew                # create next main-N and attach
 tprev               # switch to most recently used other session
 tkill main-2        # kill target session safely
+tgo 6               # shorthand for main-6
+tkill 6             # shorthand for main-6
 tkillc              # kill current session and jump to another
 tprune              # kill detached main-* sessions
-trepl               # interactive slash-command tmux REPL
-```
-
-### tmux REPL (`trepl`)
-
-```bash
-trepl
-# /help
-# /sessions
-# /tree
-# /choose
-# /doctor
-# /trace on
 ```
 
 ---

@@ -24,10 +24,6 @@ __tmux_normalize_target() {
     echo "$raw"
 }
 
-trepl() {
-    ~/.config/ghostty/tmux-repl.sh "$@"
-}
-
 tgo() {
     local target
     target="$(__tmux_normalize_target "${1:-}")"
