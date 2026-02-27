@@ -33,17 +33,18 @@ fi
 #
 # We use mkdir(2) as an atomic lock and a monotonic pending-instance counter
 # so the first instance claims the base session while subsequent ones always
-# create independent sessions. The counter file resets itself after a short
-# staleness window (PENDING_STALE_SECONDS) so normal single-tab opens later
-# in the day are unaffected.
+# create independent sessions. A batch heartbeat file keeps launch-burst state
+# stable even when Ghostty restore tabs arrive a few seconds apart.
 # ---------------------------------------------------------------------------
 readonly LOCK_DIR="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.lock"
+readonly BATCH_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.batch"
 readonly PENDING_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.pending"
 readonly CLAIMED_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.claimed"
 readonly MODE_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.mode"
 readonly FILL_FILE="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.fill"
 readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
+readonly BATCH_STALE_SECONDS=30
 readonly FILL_STALE_SECONDS=25
 readonly TRACE_ENABLED="${GHOSTTY_TMUX_TRACE:-0}"
 readonly TRACE_FILE="${GHOSTTY_TMUX_TRACE_FILE:-${STATE_DIR}/ghostty-tmux-${STATE_KEY}.trace.log}"
@@ -187,14 +188,6 @@ file_age_seconds() {
 
 BATCH_MODE=""
 set_batch_mode_if_needed() {
-    if [[ -f "$MODE_FILE" ]]; then
-        BATCH_MODE="$(cat "$MODE_FILE" 2>/dev/null || true)"
-    fi
-
-    if [[ "$BATCH_MODE" == "restore" || "$BATCH_MODE" == "normal" ]]; then
-        return 0
-    fi
-
     local session_count client_count
     session_count="$(tmux_session_count)"
     client_count="$(tmux_client_count)"
@@ -280,7 +273,6 @@ fill_restore_tabs_if_needed() {
     # Only meaningful for real interactive launches.
     [[ "$NO_ATTACH" == "1" ]] && return 0
     [[ "$BATCH_MODE" == "restore" ]] || return 0
-    [[ "$pending" -eq 1 ]] || return 0
 
     # One helper per batch.
     if [[ -f "$FILL_FILE" ]]; then
@@ -362,6 +354,26 @@ find_unattached_session() {
 }
 
 cleanup_stale_batch_files_if_needed() {
+    # Primary cleanup path for the current launcher version.
+    if [[ -f "$BATCH_FILE" ]]; then
+        local batch_age
+        batch_age="$(file_age_seconds "$BATCH_FILE")"
+        if (( batch_age > BATCH_STALE_SECONDS )); then
+            trace_log "cleanup stale_batch_epoch age=${batch_age}"
+            rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+        fi
+    fi
+
+    # Compatibility cleanup for any orphaned old-state files from previous versions.
+    if [[ ! -f "$BATCH_FILE" && -f "$PENDING_FILE" ]]; then
+        local local_age
+        local_age="$(file_age_seconds "$PENDING_FILE")"
+        if (( local_age > PENDING_STALE_SECONDS )); then
+            trace_log "cleanup stale_legacy_pending age=${local_age}"
+            rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE"
+        fi
+    fi
+
     if [[ -f "$FILL_FILE" ]]; then
         local fill_age
         fill_age="$(file_age_seconds "$FILL_FILE")"
@@ -370,23 +382,19 @@ cleanup_stale_batch_files_if_needed() {
             rm -f "$FILL_FILE"
         fi
     fi
+}
 
-    # If no batch is active, clear stale metadata from prior launches.
-    if [[ ! -f "$PENDING_FILE" ]]; then
-        rm -f "$CLAIMED_FILE" "$MODE_FILE"
+ensure_batch_initialized() {
+    if [[ ! -f "$BATCH_FILE" ]]; then
+        trace_log "batch init"
+        : > "$BATCH_FILE"
+        : > "$CLAIMED_FILE"
+        echo "0" > "$PENDING_FILE"
+    elif [[ ! -f "$PENDING_FILE" ]]; then
+        echo "0" > "$PENDING_FILE"
     fi
 
-    # Clean up stale pending counter (e.g., from a previous batch that finished).
-    if [[ -f "$PENDING_FILE" ]]; then
-        local local_age
-        local_age="$(file_age_seconds "$PENDING_FILE")"
-        if (( local_age > PENDING_STALE_SECONDS )); then
-            trace_log "cleanup stale_batch age=${local_age}"
-            rm -f "$PENDING_FILE"
-            rm -f "$CLAIMED_FILE"
-            rm -f "$MODE_FILE"
-        fi
-    fi
+    touch "$BATCH_FILE" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
@@ -450,6 +458,7 @@ unset TMUX || true
 acquire_lock
 
 cleanup_stale_batch_files_if_needed
+ensure_batch_initialized
 
 # Read and increment the pending-instance counter.
 pending=$(cat "$PENDING_FILE" 2>/dev/null || echo "0")
@@ -497,8 +506,8 @@ fi
 #      orphaning them.
 client_count="$(tmux_client_count)"
 
-if (( pending == 1 && client_count == 0 )); then
-    trace_log "attach_base first_in_batch client_count=0"
+if (( client_count == 0 )) && ! session_is_claimed "$BASE_SESSION"; then
+    trace_log "attach_base claimed=0 client_count=0"
     echo "$BASE_SESSION" >> "$CLAIMED_FILE"
     attach_or_print "$BASE_SESSION"
 fi
@@ -506,7 +515,7 @@ fi
 # In restore mode (Ghostty relaunch), reattach tabs 2+ to existing detached
 # sessions before creating anything new. In normal mode (live usage), always
 # create a fresh session for each new tab/pane/window.
-if [[ "$BATCH_MODE" == "restore" && "$pending" -gt 1 ]]; then
+if [[ "$BATCH_MODE" == "restore" ]]; then
     unattached="$(find_unattached_session || true)"
     if [[ -n "$unattached" ]]; then
         trace_log "reattach existing=${unattached}"

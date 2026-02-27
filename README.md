@@ -23,7 +23,7 @@ Ghostty + tmux. Persistent sessions, independent tabs, Catppuccin theme, sane de
 └───────────────────────────────────────────────────────────┘
 ```
 
-Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking and batch modes: restart restores reattach existing detached sessions, normal interactive tab/pane/window creation always gets fresh sessions, and restore mode can auto-open extra Ghostty tabs so every existing tmux session gets reattached.
+Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking plus per-burst claim tracking: restart restores reattach existing detached sessions, normal interactive tab/pane/window creation gets fresh sessions, and restore mode can auto-open extra Ghostty tabs so every existing tmux session gets reattached.
 
 ## Three layers of persistence
 
@@ -110,20 +110,20 @@ Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.m
 
 `ghostty-tmux.sh` runs once per Ghostty tab. It decides which tmux session to connect to.
 
-**Concurrency control.** Ghostty restores all tabs at once. Without serialization, every tab would race and attach to the same session. The launcher uses `mkdir` as an atomic lock (POSIX-guaranteed atomic) plus pending/claimed counters. State files are namespaced by uid + socket + base session so parallel sockets and tests cannot collide.
+**Concurrency control.** Ghostty restores tabs concurrently. Without serialization, multiple launcher instances can bind to the same session. The launcher uses `mkdir` as an atomic lock (POSIX-guaranteed), a batch heartbeat file, and a claimed-sessions file. State files are namespaced by uid + socket + base session so parallel sockets/tests cannot collide.
 
 **Session selection logic:**
 
 1. **Resurrect check.** If the tmux server is empty and a resurrect snapshot exists, restore it first. This handles reboots.
 2. **Base session.** If session `main` doesn't exist, create it and attach.
 3. **Force new.** If `GHOSTTY_TMUX_FORCE_NEW_SESSION=1`, always create a new session.
-4. **Batch mode.** Classify this launch burst as `restore` (detached sessions exist, no clients attached) or `normal` (live interactive usage).
-5. **First in batch.** If this is the first instance (`pending=1`) and no clients are attached, reuse `main`.
-6. **Restore tab fill.** In a restore batch, start a one-shot helper that opens additional Ghostty tabs (macOS) if detached sessions remain.
-7. **Restore mode attach.** If in a restore batch (`pending>1`), reattach to the next unattached session (prefers `main-N`, then other session names).
-8. **Normal mode / fallback.** Create the next `main-N`.
+4. **Batch mode.** Recompute mode each launch: `restore` when sessions exist but tmux has zero attached clients, otherwise `normal`.
+5. **Claim base once.** If there are zero clients and `main` is not yet claimed in this launch burst, claim and attach `main`.
+6. **Restore mode attach.** In restore mode, attach the next unattached unclaimed session (prefers `main-N`, then other names).
+7. **Normal mode / fallback.** If no reusable detached session remains, create the next `main-N`.
+8. **Restore tab fill.** In restore mode, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs.
 
-A **claimed-sessions file** tracks which sessions have been assigned in the current batch. This prevents the race where instance N releases the lock but hasn't finished `exec tmux attach` yet — instance N+1 would see the session as unattached without this guard.
+A **claimed-sessions file** tracks session assignments inside the current launch burst. This prevents the race where instance N releases the lock before `exec tmux attach` has fully registered a client.
 
 **Environment variables:**
 
@@ -133,7 +133,7 @@ A **claimed-sessions file** tracks which sessions have been assigned in the curr
 | `GHOSTTY_TMUX_SOCKET_NAME` | _(default socket)_ | Named tmux socket (`-L`) |
 | `GHOSTTY_TMUX_NO_ATTACH` | `0` | Print session name instead of attaching |
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
-| `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/pending/claimed/mode files |
+| `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/batch/pending/claimed/mode files |
 | `GHOSTTY_TMUX_STATE_KEY` | `uid-socket-base` | Namespace key for state files |
 | `GHOSTTY_TMUX_TRACE` | `0` | Enable launcher trace logging |
 | `GHOSTTY_TMUX_TRACE_FILE` | `.../ghostty-tmux-<key>.trace.log` | Custom launcher trace path |
@@ -333,6 +333,15 @@ grep '^command = ' ~/.config/ghostty/config     # should point to launcher
 readlink ~/.config/ghostty/ghostty-tmux.sh      # should point to repo
 ```
 
+For deep tracing of rebinding/flicker:
+```bash
+TRACE_FILE="/tmp/ghostty-launch-trace.log"
+rm -f "$TRACE_FILE"
+GHOSTTY_TMUX_TRACE=1 GHOSTTY_TMUX_TRACE_FILE="$TRACE_FILE" ~/.config/ghostty/ghostty-tmux.sh >/dev/null
+tail -n 200 "$TRACE_FILE"
+```
+Look for repeated `select session=main` lines in the same launch burst key; that indicates incorrect claim state.
+
 **Ctrl+Space doesn't work.**
 macOS captures it for input source switching. System Settings → Keyboard → Keyboard Shortcuts → Input Sources → uncheck "Select the previous input source." Use `Ctrl+A` as fallback.
 
@@ -391,7 +400,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 148 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 151 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -402,7 +411,7 @@ best-ghostty-config/
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             148-assertion test suite
+  test.sh             151-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

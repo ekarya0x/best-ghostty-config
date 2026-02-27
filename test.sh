@@ -15,6 +15,7 @@ TMUX_ALIASES_FILE="${REPO_DIR}/tmux-aliases.zsh"
 SOCKET="bgctest$$"
 STATE_KEY="bgctest-state-${SOCKET}"
 LOCK_DIR="/tmp/ghostty-tmux-${STATE_KEY}.lock"
+BATCH_FILE="/tmp/ghostty-tmux-${STATE_KEY}.batch"
 PENDING_FILE="/tmp/ghostty-tmux-${STATE_KEY}.pending"
 CLAIMED_FILE="/tmp/ghostty-tmux-${STATE_KEY}.claimed"
 MODE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.mode"
@@ -53,7 +54,7 @@ check_ok() {
 
 wipe() {
     tmux -L "$SOCKET" kill-server 2>/dev/null || true
-    rm -rf "$LOCK_DIR" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$TRACE_FILE"
+    rm -rf "$LOCK_DIR" "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$TRACE_FILE"
 }
 
 trap 'wipe' EXIT
@@ -158,7 +159,7 @@ bold ""
 bold "─── 5. GHOSTTY RESTART (reattach to surviving sessions) ───"
 # ============================================================================
 # Sessions survive from test 4. Clear batch state to simulate fresh launch.
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "reattach: tab 1 → main" "main" "$r1"
 check "reattach: tab 2 → main-2" "main-2" "$r2"
@@ -170,7 +171,7 @@ check "reattach: no orphans (still 4)" "4" "$(sess_count)"
 bold ""
 bold "─── 6. DOUBLE RESTART (reattach twice in a row) ───"
 # ============================================================================
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 r1=$(run); r2=$(run); r3=$(run); r4=$(run)
 check "2nd reattach: tab 1 → main" "main" "$r1"
 check "2nd reattach: tab 2 → main-2" "main-2" "$r2"
@@ -222,7 +223,7 @@ check "gaps: tab 1 → main" "main" "$r1"
 check "gaps: tab 2 → main-3 (lowest unattached)" "main-3" "$r2"
 check "gaps: tab 3 → main-7 (next lowest)" "main-7" "$r3"
 # A 4th tab should create a new session, filling gap at main-2
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 # Need to re-enter batch mode — start a fresh batch with existing 3 sessions
 wipe
 tmux -L "$SOCKET" new-session -d -s main
@@ -238,7 +239,7 @@ bold "─── 10. FORCE_NEW_SESSION ENV VAR ───"
 wipe
 run >/dev/null  # create base
 sleep 4
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
 check "force new: creates main-2" "main-2" "$r"
 r=$(GHOSTTY_TMUX_FORCE_NEW_SESSION=1 run)
@@ -254,6 +255,24 @@ touch -t 202501010000 "$LOCK_DIR" 2>/dev/null || true
 r=$(run)
 check "stale lock: recovers → main" "main" "$r"
 check_ok "stale lock: lock dir removed" test ! -d "$LOCK_DIR"
+
+# ============================================================================
+bold ""
+bold "─── 11B. DELAYED RESTORE BURST STABILITY ───"
+# ============================================================================
+wipe
+tmux -L "$SOCKET" new-session -d -s main
+tmux -L "$SOCKET" new-session -d -s main-2
+tmux -L "$SOCKET" new-session -d -s main-3
+tmux -L "$SOCKET" new-session -d -s main-4
+r1=$(run)
+sleep 4
+r2=$(run)
+sleep 4
+r3=$(run)
+check "delayed burst: call 1 → main" "main" "$r1"
+check "delayed burst: call 2 → main-2" "main-2" "$r2"
+check "delayed burst: call 3 → main-3" "main-3" "$r3"
 
 # ============================================================================
 bold ""
@@ -563,7 +582,7 @@ wipe
 r1=$(run); r2=$(run); r3=$(run)
 # Wait for stale
 sleep 4
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 # Single launch — pending resets to 1, but client_count=0 in NO_ATTACH
 # So it attaches to main (base). This is correct: a fresh single-tab launch
 # after sessions are running reuses the base.
@@ -606,7 +625,7 @@ dim "  Cold launch: ${cold_ms}ms"
 check "cold launch < 2500ms" "yes" "$( [[ "$cold_ms" != "N/A" && "$cold_ms" -lt 2500 ]] && echo yes || echo no)"
 
 # Warm sequential launch (session exists)
-rm -f "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
+rm -f "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE"
 t_start=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
 run >/dev/null
 t_end=$(python3 -c 'import time; print(time.time())' 2>/dev/null || date +%s)
