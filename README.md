@@ -23,7 +23,7 @@ Ghostty + tmux. Persistent sessions, independent tabs, Catppuccin theme, sane de
 └───────────────────────────────────────────────────────────┘
 ```
 
-Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking plus per-burst claim tracking: restart restores reattach existing detached sessions, normal interactive tab/pane/window creation gets fresh sessions, and restore mode can auto-open extra Ghostty tabs so every existing tmux session gets reattached.
+Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty-tmux.sh`) handles session assignment with atomic locking plus per-burst claim tracking: restart restores reattach existing detached sessions, normal interactive tab/pane/window creation gets fresh sessions, and optional restore fill can open extra Ghostty tabs when explicitly enabled.
 
 ## Three layers of persistence
 
@@ -38,6 +38,8 @@ Each Ghostty tab gets its own tmux session. No mirroring. The launcher (`ghostty
 **System reboot:** Ghostty restores tabs. tmux server is dead. Launcher detects empty server, finds resurrect snapshot on disk, restores all sessions, then reattaches tabs. Claude Code instances restart via `~claude` (replays original command with all flags).
 
 **tmux-continuum** auto-saves a snapshot every 5 minutes. Manual save: `prefix + Ctrl+S`. Manual restore: `prefix + Ctrl+R`.
+
+Important: if the host computer is physically powered off, tmux cannot keep running. Persistence restores state on boot, but "live still-running sessions" require the host to remain powered on.
 
 ## Install
 
@@ -187,7 +189,47 @@ tprev               # switch to most recently used other session
 tkill main-3        # kill one session safely
 tkillc              # kill current session and hop to another
 tprune              # kill detached main-* sessions
+trunaway            # dry-run detection of runaway shell-only sessions
+trunaway --apply    # guarded prune of runaway shell-only sessions
+thoston             # keep host awake (caffeinate, macOS)
+thoststatus         # show host-awake status
+thostoff            # disable host-awake mode
 ```
+
+### Guarded runaway cleanup
+
+```bash
+trunaway                                # dry-run only
+trunaway --apply                        # kill candidates
+trunaway --apply --min-index 12         # only main-12+
+trunaway --apply --max-age 1800         # only sessions newer than 30m
+trunaway --apply --all-ages             # ignore age guard
+```
+
+Candidate definition:
+- session name matches `main-N` with `N >= 10` (configurable)
+- exactly 1 window and 1 pane
+- pane command is a shell (`zsh`/`bash`/`sh`/`fish`)
+- age under 2h by default (configurable)
+
+Default is always dry-run; `--apply` is required to kill.
+
+### Always-on host + phone access
+
+For live tmux/Claude sessions from phone, the host must remain powered on and reachable.
+
+```bash
+thoston        # keep Mac awake with caffeinate
+thoststatus
+```
+
+Then connect from phone via SSH and attach:
+
+```bash
+ssh user@host -t tmux attach -t main
+```
+
+If the host is shut down, tmux is stopped. After reboot, resurrect restores from snapshots, but processes are not continuously running during power-off.
 
 ### Named project sessions
 
@@ -254,7 +296,7 @@ Every setting below differs from stock defaults.
 |---|---|---|
 | `background-opacity` | `0.8` | Desktop shows through |
 | `background-blur` | `20` | Frosted glass effect |
-| `macos-titlebar-style` | `tabs` | Tabs in titlebar saves vertical space |
+| `macos-titlebar-style` | `transparent` | More stable with `window-save-state=always` on current Ghostty/macOS combinations |
 | `window-colorspace` | `display-p3` | Wide gamut on modern Macs |
 | `window-padding-x/y` | `12` | 12px breathing room on all sides |
 | `window-padding-balance` | `true` | Centers content in the cell grid |
@@ -334,6 +376,8 @@ grep '^command = ' ~/.config/ghostty/config     # should point to launcher
 readlink ~/.config/ghostty/ghostty-tmux.sh      # should point to repo
 ```
 
+If you still see tab duplication/flicker with `window-save-state=always`, avoid `macos-titlebar-style=tabs`. Upstream Ghostty has open restore issues around titlebar tabs state handling on some versions/platform combos.
+
 For deep tracing of rebinding/flicker:
 ```bash
 TRACE_FILE="/tmp/ghostty-launch-trace.log"
@@ -401,7 +445,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 152 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 156 assertions across 31 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect infrastructure, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
 
 ## File structure
 
@@ -412,7 +456,7 @@ best-ghostty-config/
   tmux-aliases.zsh    tmux helper aliases for jump/kill/prune workflows
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             152-assertion test suite
+  test.sh             156-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

@@ -37,7 +37,10 @@ window-theme = auto
 # --- Window ---
 background-opacity = 0.8
 background-blur = 20
-macos-titlebar-style = tabs
+# NOTE: "tabs" style has known macOS restore glitches with window-save-state
+# in upstream Ghostty issues (e.g. #3049). "transparent" is materially more
+# stable for persistent restore workflows.
+macos-titlebar-style = transparent
 window-colorspace = display-p3
 window-padding-x = 12
 window-padding-y = 12

@@ -149,3 +149,174 @@ tprune() {
 
     echo "pruned $killed session(s)"
 }
+
+trunaway() {
+    local apply=0
+    local min_index="${TRUNAWAY_MIN_INDEX:-10}"
+    local max_age_seconds="${TRUNAWAY_MAX_AGE_SECONDS:-7200}"
+    local all_ages=0
+
+    while (( $# > 0 )); do
+        case "$1" in
+            --apply)
+                apply=1
+                ;;
+            --min-index)
+                shift
+                min_index="${1:-}"
+                ;;
+            --max-age)
+                shift
+                max_age_seconds="${1:-}"
+                ;;
+            --all-ages)
+                all_ages=1
+                ;;
+            -h|--help)
+                cat <<'EOF'
+usage: trunaway [--apply] [--min-index N] [--max-age SECONDS] [--all-ages]
+
+Finds "runaway-style" tmux sessions and optionally kills them.
+Candidate rules:
+  - session name is main-N (N >= min-index, default 10)
+  - exactly 1 window and 1 pane
+  - pane command is a shell (zsh/bash/sh/fish)
+  - age <= max-age (default 7200 seconds), unless --all-ages
+
+Default is dry-run. Add --apply to actually kill candidates.
+EOF
+                return 0
+                ;;
+            *)
+                echo "unknown option: $1"
+                return 1
+                ;;
+        esac
+        shift
+    done
+
+    [[ "$min_index" == <-> ]] || { echo "invalid --min-index: $min_index"; return 1; }
+    [[ "$max_age_seconds" == <-> ]] || { echo "invalid --max-age: $max_age_seconds"; return 1; }
+
+    local now
+    now="$(date +%s)"
+    local -a candidates
+    local session windows created attached idx pane_count cmd age key
+
+    while IFS='|' read -r session windows created attached; do
+        [[ "$session" == main-* ]] || continue
+        idx="${session#main-}"
+        [[ "$idx" == <-> ]] || continue
+        (( idx >= min_index )) || continue
+        [[ "$windows" == "1" ]] || continue
+
+        pane_count="$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null | wc -l | tr -d '[:space:]')"
+        [[ "$pane_count" == "1" ]] || continue
+
+        cmd="$(tmux list-panes -t "$session" -F '#{pane_current_command}' 2>/dev/null | head -n1 | tr -d '\r')"
+        case "$cmd" in
+            zsh|bash|sh|fish) ;;
+            *) continue ;;
+        esac
+
+        age=0
+        if [[ "$created" == <-> ]]; then
+            age=$(( now - created ))
+            (( age < 0 )) && age=0
+        fi
+        if (( all_ages == 0 && age > max_age_seconds )); then
+            continue
+        fi
+
+        key="$(printf '%06d' "$idx")"
+        candidates+=("${key}|${session}|${attached}|${cmd}|${age}")
+    done < <(tmux ls -F '#{session_name}|#{session_windows}|#{session_created}|#{session_attached}' 2>/dev/null)
+
+    if (( ${#candidates[@]} == 0 )); then
+        echo "no runaway-style session candidates found"
+        return 0
+    fi
+
+    echo "runaway candidates:"
+    local row out_session out_attached out_cmd out_age
+    local -a sorted
+    sorted=("${(@On)candidates}")
+    for row in "${sorted[@]}"; do
+        IFS='|' read -r _ out_session out_attached out_cmd out_age <<< "$row"
+        printf '  %s attached=%s cmd=%s age=%ss\n' "$out_session" "$out_attached" "$out_cmd" "$out_age"
+    done
+
+    if (( apply == 0 )); then
+        echo "dry-run only. run with --apply to kill these sessions."
+        return 0
+    fi
+
+    local killed=0 failed=0
+    for row in "${sorted[@]}"; do
+        IFS='|' read -r _ out_session out_attached out_cmd out_age <<< "$row"
+        if tkill "$out_session" >/dev/null 2>&1; then
+            printf 'killed: %s\n' "$out_session"
+            killed=$((killed + 1))
+        else
+            printf 'failed: %s\n' "$out_session"
+            failed=$((failed + 1))
+        fi
+    done
+
+    printf 'runaway prune complete: killed=%d failed=%d\n' "$killed" "$failed"
+    (( failed == 0 ))
+}
+
+thoston() {
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/best-ghostty-config"
+    local pid_file="${state_dir}/caffeinate.pid"
+    mkdir -p "$state_dir"
+
+    if [[ -f "$pid_file" ]]; then
+        local existing
+        existing="$(cat "$pid_file" 2>/dev/null || true)"
+        if [[ -n "$existing" ]] && kill -0 "$existing" 2>/dev/null; then
+            echo "host-awake already active (pid=$existing)"
+            return 0
+        fi
+        rm -f "$pid_file"
+    fi
+
+    command -v caffeinate >/dev/null 2>&1 || { echo "caffeinate not found (macOS only)"; return 1; }
+    nohup caffeinate -dimsu >/dev/null 2>&1 &
+    echo "$!" > "$pid_file"
+    echo "host-awake enabled (pid=$!)"
+}
+
+thostoff() {
+    local pid_file="${XDG_STATE_HOME:-$HOME/.local/state}/best-ghostty-config/caffeinate.pid"
+    if [[ ! -f "$pid_file" ]]; then
+        echo "host-awake not active"
+        return 0
+    fi
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null || true
+        echo "host-awake disabled"
+    else
+        echo "host-awake pid file stale; cleaned"
+    fi
+    rm -f "$pid_file"
+}
+
+thoststatus() {
+    local pid_file="${XDG_STATE_HOME:-$HOME/.local/state}/best-ghostty-config/caffeinate.pid"
+    if [[ ! -f "$pid_file" ]]; then
+        echo "host-awake inactive"
+        return 1
+    fi
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+        echo "host-awake active (pid=$pid)"
+        return 0
+    fi
+    echo "host-awake stale pid file"
+    return 1
+}

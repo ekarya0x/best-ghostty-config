@@ -162,6 +162,11 @@ tgo 6               # shorthand for main-6
 tkill 6             # shorthand for main-6
 tkillc              # kill current session and jump to another
 tprune              # kill detached main-* sessions
+trunaway            # dry-run runaway shell-session detection
+trunaway --apply    # guarded prune of runaway shell-only sessions
+thoston             # keep host awake (macOS)
+thoststatus         # show host-awake status
+thostoff            # disable host-awake mode
 ```
 
 ---
