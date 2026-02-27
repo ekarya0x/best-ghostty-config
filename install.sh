@@ -147,7 +147,7 @@ prepare_launcher_script() {
 
 validate_launcher_command_line() {
     local config_file="$REPO_DIR/config"
-    local expected="command = ~/.config/ghostty/ghostty-tmux.sh"
+    local expected="command = env GHOSTTY_TMUX_AUTO_FILL_RESTORE=1 GHOSTTY_TMUX_AUTO_FILL_MAX_TABS=12 ~/.config/ghostty/ghostty-tmux.sh"
     local current
     current="$(grep '^command = ' "$config_file" || true)"
 

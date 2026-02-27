@@ -335,9 +335,10 @@ gdrift() {
     fi
 
     echo "hidden assume-unchanged entries:"
-    while IFS= read -r path; do
-        [[ -n "$path" ]] || continue
-        printf '  %s\n' "$path"
+    local entry
+    while IFS= read -r entry; do
+        [[ -n "$entry" ]] || continue
+        printf '  %s\n' "$entry"
     done <<< "$hidden"
 }
 
@@ -354,11 +355,11 @@ gdriftfix() {
         return 0
     fi
 
-    local path
+    local entry
     local count=0
-    while IFS= read -r path; do
-        [[ -n "$path" ]] || continue
-        git update-index --no-assume-unchanged -- "$path"
+    while IFS= read -r entry; do
+        [[ -n "$entry" ]] || continue
+        git update-index --no-assume-unchanged -- "$entry"
         count=$((count + 1))
     done <<< "$hidden"
 

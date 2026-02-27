@@ -99,7 +99,7 @@ check_ok "tmux-aliases.zsh: zsh -n syntax" zsh -n "$TMUX_ALIASES_FILE"
 shebang=$(head -1 "$SCRIPT")
 check "shebang is #!/usr/bin/env bash" "#!/usr/bin/env bash" "$shebang"
 check_ok "auto-fill restore default present" grep -q 'AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"' "$SCRIPT"
-check_ok "auto-fill max tabs default present" grep -q 'AUTO_FILL_RESTORE_MAX_TABS="${GHOSTTY_TMUX_AUTO_FILL_MAX_TABS:-6}"' "$SCRIPT"
+check_ok "auto-fill max tabs default present" grep -q 'AUTO_FILL_RESTORE_MAX_TABS="${GHOSTTY_TMUX_AUTO_FILL_MAX_TABS:-12}"' "$SCRIPT"
 
 check "tmux-aliases: normalize numeric target" "main-6" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; __tmux_normalize_target 6')"
 check_ok "tmux-aliases: has trunaway()" grep -q '^trunaway()' "$TMUX_ALIASES_FILE"
@@ -111,6 +111,9 @@ check_ok "tmux-aliases: has gdriftfix()" grep -q '^gdriftfix()' "$TMUX_ALIASES_F
 check_ok "tmux-aliases: has tvpncheck()" grep -q '^tvpncheck()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has tmosh()" grep -q '^tmosh()' "$TMUX_ALIASES_FILE"
 check_ok "tmux-aliases: has tmoshdoctor()" grep -q '^tmoshdoctor()' "$TMUX_ALIASES_FILE"
+check "tmux-aliases: gdrift outside repo guard" "not inside a git repository" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; (cd /tmp && gdrift)')"
+check "tmux-aliases: tvpncheck usage" "usage: tvpncheck <tailscale-host-or-ip>" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; tvpncheck 2>/dev/null | head -n1')"
+check "tmux-aliases: tmosh help usage" "usage: tmosh [--no-check] [--ssh \"ssh ...\"] [--port UDP_PORT] <tailscale-host-or-ip> [-- remote-command...]" "$(zsh -c 'source "'"$TMUX_ALIASES_FILE"'"; tmosh --help | head -n1')"
 
 # ============================================================================
 bold ""
@@ -474,7 +477,7 @@ bold "─── 21. GHOSTTY CONFIG ───"
 # ============================================================================
 gc="$GHOSTTY_CONFIG_FILE"
 check_ok "window-save-state = always" grep -q 'window-save-state = always' "$gc"
-check_ok "command = ghostty-tmux.sh" grep -q 'command = ~/.config/ghostty/ghostty-tmux.sh' "$gc"
+check_ok "command sets restore env policy" grep -q 'command = env GHOSTTY_TMUX_AUTO_FILL_RESTORE=1 GHOSTTY_TMUX_AUTO_FILL_MAX_TABS=12 ~/.config/ghostty/ghostty-tmux.sh' "$gc"
 check_ok "confirm-close-surface = false" grep -q 'confirm-close-surface = false' "$gc"
 check_ok "window-inherit-working-directory = true" grep -q 'window-inherit-working-directory = true' "$gc"
 check_ok "macos-titlebar-style = transparent" grep -q 'macos-titlebar-style = transparent' "$gc"
