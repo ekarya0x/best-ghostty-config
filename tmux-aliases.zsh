@@ -541,11 +541,12 @@ EOF
     TMUX="" "$restore_script"
 
     if (( needs_cleanup )) && tmux has-session -t "_bgc_restore" 2>/dev/null; then
-        # Remove bootstrap if real sessions were restored.
-        local restored_count
-        restored_count="$(tmux list-sessions 2>/dev/null | wc -l | tr -d '[:space:]')"
-        if (( restored_count > 1 )); then
+        # Remove bootstrap if real sessions were restored; otherwise rename it
+        # so the user gets a usable base session instead of a lingering orphan.
+        if tmux has-session -t "main" 2>/dev/null; then
             tmux kill-session -t "_bgc_restore" 2>/dev/null || true
+        else
+            tmux rename-session -t "_bgc_restore" "main" 2>/dev/null || true
         fi
     fi
 

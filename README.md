@@ -526,7 +526,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 209 assertions across 37 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect snapshot fallback selection, runaway cleanup integration, command shim wiring, plugin settings, config correctness, symlink integrity, and launch latency benchmarks. Does not touch live sessions.
+Runs 212 assertions across 38 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect snapshot fallback selection, runaway cleanup integration, command shim wiring, plugin settings, config correctness, symlink integrity, launch latency benchmarks, and bash-side snapshot discovery consistency. Does not touch live sessions.
 
 ## File structure
 
@@ -538,7 +538,7 @@ best-ghostty-config/
   tmux-command-shim.zsh command shim dispatcher for PATH-based helpers
   tmux.conf           tmux settings + keybindings + persistence plugins
   install.sh          Symlinks, dependency checks, TPM + plugin installation
-  test.sh             209-assertion test suite
+  test.sh             212-assertion test suite
   docs/
     cheatsheet/
       keybindings.md  Printable keybinding reference

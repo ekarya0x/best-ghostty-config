@@ -276,7 +276,7 @@ select_resurrect_snapshot() {
             printf '%s\n' "$f"
             return 0
         fi
-    done < <(ls -1t "$dir"/tmux_resurrect_*.txt 2>/dev/null || true)
+    done < <(find "$dir" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' -print 2>/dev/null | LC_ALL=C sort -r)
 
     printf '%s\n' "$latest_file"
 }

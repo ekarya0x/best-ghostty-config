@@ -963,6 +963,43 @@ rm -f "$future_file"
 check "file_age: future file clamped to 0" "0" "$future_age"
 
 # ============================================================================
+bold ""
+bold "─── 38. BASH-SIDE SNAPSHOT DISCOVERY (find|sort consistency) ───"
+# ============================================================================
+# Verify select_resurrect_snapshot in ghostty-tmux.sh uses find-based discovery
+# and handles empty directories without errors.
+SNAP_DIR6="$(mktemp -d)"
+
+# Empty dir: select_resurrect_snapshot should return failure (no files)
+snap_empty=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    bash -c 'eval "$1"; select_resurrect_snapshot "'"$SNAP_DIR6"'/last" 2>/dev/null' _ "$FUNC_DEFS" 2>/dev/null || echo "EMPTY")
+check "bash snapshot: empty dir returns empty" "EMPTY" "$snap_empty"
+
+# Now populate: shell-only latest, non-shell older
+cat > "$SNAP_DIR6/tmux_resurrect_20260227T160000.txt" <<'SNAP'
+pane	main	0	:zsh	0	0	:*	0	:/Users/me	zsh
+SNAP
+cat > "$SNAP_DIR6/tmux_resurrect_20260226T100000.txt" <<'SNAP'
+pane	main	0	:vim	0	0	:*	0	:/Users/me	vim
+pane	main-2	0	:claude	0	0	:*	0	:/Users/me	claude
+SNAP
+touch -t 202602271600 "$SNAP_DIR6/tmux_resurrect_20260227T160000.txt"
+touch -t 202602261000 "$SNAP_DIR6/tmux_resurrect_20260226T100000.txt"
+# Create a "last" symlink pointing to the shell-only latest
+ln -fs "tmux_resurrect_20260227T160000.txt" "$SNAP_DIR6/last"
+
+snap_fallback=$(GHOSTTY_TMUX_SOCKET_NAME="$SOCKET" GHOSTTY_TMUX_STATE_KEY="$STATE_KEY" GHOSTTY_TMUX_NO_ATTACH=1 \
+    GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY=1 GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS=7 \
+    bash -c 'eval "$1"; select_resurrect_snapshot "'"$SNAP_DIR6"'/last"' _ "$FUNC_DEFS" 2>/dev/null || echo "FAIL")
+check "bash snapshot: fallback selects non-shell file" "yes" "$(basename "$snap_fallback" | grep -q '20260226' && echo yes || echo no)"
+
+# Verify find-based discovery doesn't include the "last" symlink
+snap_count=$(find "$SNAP_DIR6" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' -print 2>/dev/null | wc -l | tr -d '[:space:]')
+check "bash snapshot: find excludes 'last' symlink" "2" "$snap_count"
+
+rm -rf "$SNAP_DIR6"
+
+# ============================================================================
 # FINAL SUMMARY
 # ============================================================================
 echo ""
