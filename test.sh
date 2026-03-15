@@ -23,6 +23,7 @@ MODE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.mode"
 FILL_FILE="/tmp/ghostty-tmux-${STATE_KEY}.fill"
 FILL_MARK_FILE="/tmp/ghostty-tmux-${STATE_KEY}.fill-mark"
 TRACE_FILE="/tmp/ghostty-tmux-${STATE_KEY}.trace.log"
+CLIENT_PIDS=()
 
 green() { printf '\033[1;32m%s\033[0m\n' "$1"; }
 red()   { printf '\033[1;31m%s\033[0m\n' "$1"; }
@@ -55,6 +56,13 @@ check_ok() {
 }
 
 wipe() {
+    local pid
+    for pid in "${CLIENT_PIDS[@]:-}"; do
+        [[ -n "$pid" ]] || continue
+        kill "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
+    CLIENT_PIDS=()
     tmux -L "$SOCKET" kill-server 2>/dev/null || true
     rm -rf "$LOCK_DIR" "$BATCH_FILE" "$PENDING_FILE" "$CLAIMED_FILE" "$MODE_FILE" "$FILL_FILE" "$FILL_MARK_FILE" "$TRACE_FILE"
     # Clean XDG state files that may have been created by sourced-script tests
@@ -81,6 +89,26 @@ sess_list() {
     tmux -L "$SOCKET" list-sessions -F '#{session_name}' 2>/dev/null | sort
 }
 
+spawn_attached_client() {
+    local target="${1:-main}"
+    expect -c "set timeout -1; spawn env TERM=xterm-256color tmux -L $SOCKET attach -t $target; after 10000" >/dev/null 2>&1 &
+    local pid=$!
+    CLIENT_PIDS+=("$pid")
+
+    local i=0
+    while (( i < 100 )); do
+        if tmux -L "$SOCKET" list-clients -F '#{client_session}' 2>/dev/null | grep -qx "$target"; then
+            return 0
+        fi
+        sleep 0.1
+        i=$((i + 1))
+    done
+
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    return 1
+}
+
 # ============================================================================
 bold ""
 bold "╔══════════════════════════════════════════════════╗"
@@ -105,7 +133,8 @@ shebang=$(head -1 "$SCRIPT")
 check "shebang is #!/usr/bin/env bash" "#!/usr/bin/env bash" "$shebang"
 check_ok "auto-fill restore default present" grep -q 'AUTO_FILL_RESTORE="${GHOSTTY_TMUX_AUTO_FILL_RESTORE:-0}"' "$SCRIPT"
 check_ok "auto-fill max tabs default present" grep -q 'AUTO_FILL_RESTORE_MAX_TABS="${GHOSTTY_TMUX_AUTO_FILL_MAX_TABS:-12}"' "$SCRIPT"
-check_ok "auto-fill settle default present" grep -q 'AUTO_FILL_SETTLE_SECONDS="${GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS:-2}"' "$SCRIPT"
+check_ok "reattach grace default present" grep -q 'RESTORE_REATTACH_GRACE_SECONDS="${GHOSTTY_TMUX_REATTACH_GRACE_SECONDS:-5}"' "$SCRIPT"
+check_ok "auto-fill settle default present" grep -q 'AUTO_FILL_SETTLE_SECONDS="${GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS:-5}"' "$SCRIPT"
 check_ok "restore fallback default present" grep -q 'RESTORE_FALLBACK_ON_EMPTY="${GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY:-1}"' "$SCRIPT"
 check_ok "restore fallback age default present" grep -q 'RESTORE_FALLBACK_MAX_AGE_DAYS="${GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS:-7}"' "$SCRIPT"
 
@@ -302,6 +331,33 @@ r3=$(run)
 check "delayed burst: call 1 → main" "main" "$r1"
 check "delayed burst: call 2 → main-2" "main-2" "$r2"
 check "delayed burst: call 3 → main-3" "main-3" "$r3"
+
+# ============================================================================
+bold ""
+bold "─── 11C. LIVE CLIENT RESTORE GRACE ───"
+# ============================================================================
+wipe
+tmux -L "$SOCKET" new-session -d -s main
+tmux -L "$SOCKET" new-session -d -s main-2
+tmux -L "$SOCKET" new-session -d -s main-3
+r1=$(GHOSTTY_TMUX_REATTACH_GRACE_SECONDS=2 run)
+check "live grace: initial restore → main" "main" "$r1"
+check_ok "live grace: attach client to main" spawn_attached_client main
+sleep 1
+r2=$(GHOSTTY_TMUX_REATTACH_GRACE_SECONDS=2 run)
+check "live grace: within grace reattaches main-2" "main-2" "$r2"
+
+wipe
+tmux -L "$SOCKET" new-session -d -s main
+tmux -L "$SOCKET" new-session -d -s main-2
+tmux -L "$SOCKET" new-session -d -s main-3
+r1=$(GHOSTTY_TMUX_REATTACH_GRACE_SECONDS=2 run)
+check "live grace: reset initial restore → main" "main" "$r1"
+check_ok "live grace: reattach client to main" spawn_attached_client main
+sleep 3
+r2=$(GHOSTTY_TMUX_REATTACH_GRACE_SECONDS=2 run)
+check "live grace: post-grace open creates fresh session" "main-4" "$r2"
+check "live grace: fresh session count = 4" "4" "$(sess_count)"
 
 # ============================================================================
 bold ""

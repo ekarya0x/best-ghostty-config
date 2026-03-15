@@ -19,6 +19,11 @@ if ! [[ "$AUTO_FILL_RESTORE_MAX_TABS" =~ ^[0-9]+$ ]]; then
     AUTO_FILL_RESTORE_MAX_TABS=12
 fi
 readonly AUTO_FILL_RESTORE_MAX_TABS
+RESTORE_REATTACH_GRACE_SECONDS="${GHOSTTY_TMUX_REATTACH_GRACE_SECONDS:-5}"
+if ! [[ "$RESTORE_REATTACH_GRACE_SECONDS" =~ ^[0-9]+$ ]]; then
+    RESTORE_REATTACH_GRACE_SECONDS=5
+fi
+readonly RESTORE_REATTACH_GRACE_SECONDS
 readonly STATE_DIR="${GHOSTTY_TMUX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/best-ghostty-config}"
 STATE_KEY="${GHOSTTY_TMUX_STATE_KEY:-$(id -u)-${SOCKET_NAME:-default}-${BASE_SESSION}}"
 STATE_KEY="$(printf '%s' "$STATE_KEY" | tr -c 'A-Za-z0-9._-' '_')"
@@ -54,9 +59,9 @@ readonly LOCK_STALE_SECONDS=5
 readonly PENDING_STALE_SECONDS=3
 readonly BATCH_STALE_SECONDS=30
 readonly FILL_STALE_SECONDS=25
-AUTO_FILL_SETTLE_SECONDS="${GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS:-2}"
+AUTO_FILL_SETTLE_SECONDS="${GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS:-5}"
 if ! [[ "$AUTO_FILL_SETTLE_SECONDS" =~ ^[0-9]+$ ]]; then
-    AUTO_FILL_SETTLE_SECONDS=2
+    AUTO_FILL_SETTLE_SECONDS=5
 fi
 readonly AUTO_FILL_SETTLE_SECONDS
 readonly RESTORE_FALLBACK_ON_EMPTY="${GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY:-1}"
@@ -697,6 +702,11 @@ unset TMUX || true
 # ---------------------------------------------------------------------------
 acquire_lock
 
+BATCH_IDLE_SECONDS=0
+if [[ -f "$BATCH_FILE" ]]; then
+    BATCH_IDLE_SECONDS="$(file_age_seconds "$BATCH_FILE")"
+fi
+
 cleanup_stale_batch_files_if_needed
 ensure_batch_initialized
 
@@ -756,9 +766,18 @@ if (( client_count == 0 )) && ! session_is_claimed "$BASE_SESSION"; then
 fi
 
 # In restore mode (Ghostty relaunch), reattach tabs 2+ to existing detached
-# sessions before creating anything new. In normal mode (live usage), always
-# create a fresh session for each new tab/pane/window.
+# sessions before creating anything new, but only while the restore burst is
+# still active. After a quiet gap, treat the next launcher as a user-initiated
+# tab open and create a fresh session instead of reviving old detached tabs.
+restore_can_reuse_existing=0
 if [[ "$BATCH_MODE" == "restore" ]]; then
+    if (( client_count == 0 || BATCH_IDLE_SECONDS <= RESTORE_REATTACH_GRACE_SECONDS )); then
+        restore_can_reuse_existing=1
+    fi
+    trace_log "restore_reuse=${restore_can_reuse_existing} client_count=${client_count} batch_idle=${BATCH_IDLE_SECONDS}s grace=${RESTORE_REATTACH_GRACE_SECONDS}s"
+fi
+
+if (( restore_can_reuse_existing == 1 )); then
     unattached="$(find_unattached_session || true)"
     if [[ -n "$unattached" ]]; then
         trace_log "reattach existing=${unattached}"

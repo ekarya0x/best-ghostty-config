@@ -92,7 +92,9 @@ macos-window-shadow = true
 # Each Ghostty tab gets its own tmux session (main, main-2, main-3, ...).
 # To use Ghostty without tmux, comment out the line below.
 # Local restore policy: auto-fill enabled with a hard cap of 12 tabs per
-# restore burst. Change these env vars to tune behavior.
+# restore burst. The launcher also treats a quiet gap as the end of restore,
+# so a later Cmd+T creates a fresh tmux session instead of reviving backlog.
+# Change these env vars to tune behavior.
 command = env GHOSTTY_TMUX_AUTO_FILL_RESTORE=1 GHOSTTY_TMUX_AUTO_FILL_MAX_TABS=12 ~/.config/ghostty/ghostty-tmux.sh
 
 # --- Scrollback ---

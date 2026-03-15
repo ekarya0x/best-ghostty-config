@@ -122,9 +122,9 @@ Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.m
 3. **Force new.** If `GHOSTTY_TMUX_FORCE_NEW_SESSION=1`, always create a new session.
 4. **Batch mode.** Recompute mode each launch: `restore` when sessions exist but tmux has zero attached clients, otherwise `normal`.
 5. **Claim base once.** If there are zero clients and `main` is not yet claimed in this launch burst, claim and attach `main`.
-6. **Restore mode attach.** In restore mode, attach the next unattached unclaimed session (prefers `main-N`, then other names).
-7. **Normal mode / fallback.** If no reusable detached session remains, create the next `main-N`.
-8. **Optional restore tab fill.** If `GHOSTTY_TMUX_AUTO_FILL_RESTORE=1`, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs. Fill is capped by `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` (default `12`) to prevent runaway tab storms.
+6. **Restore mode attach.** In restore mode, attach the next unattached unclaimed session (prefers `main-N`, then other names), but only while the restore burst is still active.
+7. **Quiet-gap cutoff.** After a restore-specific quiet gap (`GHOSTTY_TMUX_REATTACH_GRACE_SECONDS`, default `5`), treat the next launcher as a manual tab open and create a fresh session instead of reviving old detached tabs.
+8. **Optional restore tab fill.** If `GHOSTTY_TMUX_AUTO_FILL_RESTORE=1`, a one-shot helper opens extra Ghostty tabs (macOS) when detached sessions outnumber restored tabs. Fill is capped by `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` (default `12`) to prevent runaway tab storms, and it waits for a longer quiet settle window before synthesizing tabs.
 
 A **claimed-sessions file** tracks session assignments inside the current launch burst. Claims are PID-scoped and only count while the claiming process is alive, preventing stale claims from a prior Ghostty run from leaking into a fast relaunch.
 
@@ -138,7 +138,8 @@ A **claimed-sessions file** tracks session assignments inside the current launch
 | `GHOSTTY_TMUX_FORCE_NEW_SESSION` | `0` | Always create a new session |
 | `GHOSTTY_TMUX_AUTO_FILL_RESTORE` | `0` | Auto-open extra Ghostty tabs in restore mode (opt-in) |
 | `GHOSTTY_TMUX_AUTO_FILL_MAX_TABS` | `12` | Safety cap for auto-fill tab creation during restore |
-| `GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS` | `2` | Quiet-period gate before auto-fill opens synthetic tabs |
+| `GHOSTTY_TMUX_REATTACH_GRACE_SECONDS` | `5` | Quiet-gap cutoff before restore mode stops reviving detached sessions |
+| `GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS` | `5` | Quiet-period gate before auto-fill opens synthetic tabs |
 | `GHOSTTY_TMUX_RESTORE_FALLBACK_ON_EMPTY` | `1` | If latest snapshot is shell-only, fallback to recent non-shell snapshot |
 | `GHOSTTY_TMUX_RESTORE_FALLBACK_MAX_AGE_DAYS` | `7` | Max age window for fallback snapshot search |
 | `GHOSTTY_TMUX_STATE_DIR` | `/tmp` | Directory for lock/batch/pending/claimed/mode files |
@@ -237,7 +238,8 @@ Default is always dry-run; `--apply` is required to kill.
 - By default (`GHOSTTY_TMUX_AUTO_FILL_RESTORE=0`), launcher never opens extra Ghostty tabs on its own.
 - When enabled (`=1`), it may open additional tabs only during restore mode to reattach detached sessions.
 - Auto-fill now has a hard safety cap (`GHOSTTY_TMUX_AUTO_FILL_MAX_TABS`, default `12`) so one launch cannot spawn unlimited tabs.
-- Auto-fill waits for a quiet settle window (`GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS`, default `2`) before opening tabs, which reduces restore flicker/races.
+- Restore reattachment stops after a quiet gap (`GHOSTTY_TMUX_REATTACH_GRACE_SECONDS`, default `5`), so a later manual `Cmd+T` creates a fresh session instead of reviving old tabs.
+- Auto-fill waits for a quiet settle window (`GHOSTTY_TMUX_AUTO_FILL_SETTLE_SECONDS`, default `5`) before opening tabs, which reduces restore flicker/races.
 - This repository currently opts in via the Ghostty `command` line:
   `command = env GHOSTTY_TMUX_AUTO_FILL_RESTORE=1 GHOSTTY_TMUX_AUTO_FILL_MAX_TABS=12 ~/.config/ghostty/ghostty-tmux.sh`
 
@@ -526,7 +528,7 @@ tmux show -gv @continuum-save-interval                                  # 5
 ./test.sh
 ```
 
-Runs 215 assertions across 39 test groups on an isolated tmux socket. Covers batch launches, delayed restore bursts, reattachment, gap-filling, race conditions, parallel stress, resurrect snapshot fallback selection, runaway cleanup integration, command shim wiring, plugin settings, config correctness, symlink integrity, launch latency benchmarks, bash-side snapshot discovery consistency, and lock-owner liveness under stale-age conditions. Does not touch live sessions.
+Runs 274 assertions on an isolated tmux socket. Covers batch launches, delayed restore bursts, live-client restore grace, reattachment, gap-filling, race conditions, parallel stress, resurrect snapshot fallback selection, runaway cleanup integration, command shim wiring, plugin settings, config correctness, symlink integrity, launch latency benchmarks, bash-side snapshot discovery consistency, and lock-owner liveness under stale-age conditions.
 
 ## File structure
 
