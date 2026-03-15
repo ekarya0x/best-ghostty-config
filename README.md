@@ -84,28 +84,99 @@ cd ~/.ghostty-config && git pull --ff-only && ./install.sh
 
 ## Quick reference
 
-```
-GHOSTTY (Cmd-based)                     TMUX (prefix + key)
-                                        prefix = Ctrl+Space or Ctrl+A
+Use **Ghostty** for top-level app actions and **tmux** for everything inside the current tab.
 
-Ctrl+`            quick terminal        |         split right
-Cmd+T             new tab               -         split down
-Cmd+W             close pane            h/j/k/l   navigate (vim)
-Cmd+Shift+W       close tab             H/J/K/L   resize (repeatable)
-Cmd+Shift+←/→     prev/next tab         z         zoom pane
-Cmd+1–9           jump to tab           x         kill pane
-Cmd+D             split right           >/<       swap pane
-Cmd+Shift+D       split down            c         new window
-Cmd+Alt+Arrow     focus split           n/p       next/prev window
-Cmd+Ctrl+Arrow    resize split          1–9       jump to window
-Cmd+Shift+E       equalize splits       X         kill window
-Cmd+Shift+F       zoom split            d         detach
-Cmd+Shift+P       command palette       s         session picker
-Cmd+Shift+,       reload config         [         copy mode (vi)
-Cmd+= / - / 0     font size             r         reload config
-Ctrl+Cmd+F        fullscreen            Ctrl+S    save sessions (resurrect)
-Shift+Return      newline in prompt     Ctrl+R    restore sessions (resurrect)
-```
+tmux prefix: **Ctrl+Space**. Fallback: **Ctrl+A**.
+
+### Start here
+
+| If you want to... | Use | Key |
+|---|---|---|
+| Open a new top-level tab and session | Ghostty | `Cmd+T` |
+| Split the current Ghostty tab | Ghostty | `Cmd+D` / `Cmd+Shift+D` |
+| Split inside the current tmux layout | tmux | `prefix + \|` / `prefix + -` |
+| Move around the current tmux pane layout | tmux | `prefix + h/j/k/l` |
+| Create another window inside the current tmux session | tmux | `prefix + c` |
+| Switch top-level tabs | Ghostty | `Cmd+Shift+←/→` or `Cmd+1–9` |
+| Switch tmux windows inside the current session | tmux | `prefix + n/p` or `prefix + 1–9` |
+| Safely leave without losing work | Ghostty / tmux | `Cmd+Q` or `prefix + d` |
+
+### Ghostty bindings
+
+**Tabs and app controls**
+
+| Key | Action |
+|---|---|
+| ``Ctrl+` `` | Toggle quick terminal from anywhere on macOS |
+| `Cmd+T` | New Ghostty tab |
+| `Cmd+W` | Close current pane |
+| `Cmd+Shift+W` | Close current tab |
+| `Cmd+Shift+←/→` | Previous / next tab |
+| `Cmd+1–9` | Jump to tab |
+| `Cmd+Ctrl+Shift+←/→` | Move tab left / right |
+| `Cmd+Shift+P` | Command palette |
+| `Cmd+Shift+,` | Reload Ghostty config |
+| `Ctrl+Cmd+F` | Fullscreen |
+| `Cmd+Shift+S` | Secure input |
+| `Cmd+Shift+I` | Inspector |
+| `Shift+Return` | Newline in prompt fields |
+
+**Splits and layout**
+
+| Key | Action |
+|---|---|
+| `Cmd+D` | Split right |
+| `Cmd+Shift+D` | Split down |
+| `Cmd+Alt+Arrow` | Focus split in direction |
+| `Cmd+Ctrl+Arrow` | Resize split |
+| `Cmd+Shift+E` | Equalize splits |
+| `Cmd+Shift+F` | Zoom / unzoom split |
+
+**Display**
+
+| Key | Action |
+|---|---|
+| `Cmd+=` | Increase font size |
+| `Cmd+-` | Decrease font size |
+| `Cmd+0` | Reset font size |
+
+### tmux bindings
+
+All tmux actions below require the prefix first.
+
+**Panes**
+
+| Key | Action |
+|---|---|
+| `prefix + \|` | Split right |
+| `prefix + -` | Split down |
+| `prefix + h/j/k/l` | Move between panes |
+| `prefix + H/J/K/L` | Resize pane |
+| `prefix + z` | Zoom / unzoom pane |
+| `prefix + x` | Kill pane |
+| `prefix + >` / `prefix + <` | Swap pane forward / backward |
+
+**Windows and sessions**
+
+| Key | Action |
+|---|---|
+| `prefix + c` | New tmux window |
+| `prefix + n/p` | Next / previous window |
+| `prefix + 1–9` | Jump to window |
+| `prefix + X` | Kill window |
+| `prefix + s` | Session picker |
+| `prefix + d` | Detach client and keep session running |
+| `prefix + r` | Reload tmux config |
+
+**Copy mode and persistence**
+
+| Key | Action |
+|---|---|
+| `prefix + [` | Enter copy mode |
+| `v` / `y` / `Esc` | Select / copy / exit copy mode |
+| `/` / `?` | Search forward / backward in copy mode |
+| `prefix + Ctrl+S` | Save tmux snapshot |
+| `prefix + Ctrl+R` | Restore tmux snapshot |
 
 Full reference: [`docs/cheatsheet/keybindings.md`](docs/cheatsheet/keybindings.md)
 
