@@ -16,7 +16,7 @@ case "$cmd_type" in
     *"function")
         ;;
     *)
-        echo "command shim target is not a function: $cmd_name" >&2
+        echo "command not found: $cmd_name (re-run install.sh?)" >&2
         exit 1
         ;;
 esac

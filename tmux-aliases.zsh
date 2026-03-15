@@ -4,11 +4,320 @@
 # Load from ~/.zshrc:
 #   [[ -f ~/.config/ghostty/tmux-aliases.zsh ]] && source ~/.config/ghostty/tmux-aliases.zsh
 
-alias tls='tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}"'
-alias twin='tmux list-windows -a -F "#{session_name}:#{window_index} active=#{window_active} panes=#{window_panes} name=#{window_name}"'
-alias tpanes='tmux list-panes -a -F "#{session_name}:#{window_index}.#{pane_index} active=#{pane_active} cmd=#{pane_current_command} cwd=#{pane_current_path}"'
-alias ttree='tmux choose-tree -sZw'
-alias tmain='tgo main'
+# --- Shared helpers ---
+
+__tmux_require_server() {
+    if ! tmux list-sessions >/dev/null 2>&1; then
+        printf '%s: %s\n' "${1:-tmux}" "server is not running (start with: tmux new-session)" >&2
+        return 1
+    fi
+}
+
+tls() {
+    __tmux_require_server tls || return 1
+    __tmux_list
+}
+
+twin() {
+    __tmux_require_server twin || return 1
+    tmux list-windows -a -F '#{session_name}:#{window_index} active=#{window_active} panes=#{window_panes} name=#{window_name}' 2>/dev/null
+}
+
+tpanes() {
+    __tmux_require_server tpanes || return 1
+    tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} active=#{pane_active} cmd=#{pane_current_command} cwd=#{pane_current_path}' 2>/dev/null
+}
+
+ttree() {
+    __tmux_require_server ttree || return 1
+    tmux choose-tree -sZw
+}
+
+tmain() {
+    tgo main
+}
+
+# --- Dashboard helpers ---
+
+__tpanel_workload() {
+    local cmd="$1"
+    case "$cmd" in
+        claude|claude-code)    echo "claude" ;;
+        vim|nvim|vi|nano)      echo "editor" ;;
+        node|deno|bun)         echo "node" ;;
+        python|python3|ipython) echo "python" ;;
+        ruby|irb)              echo "ruby" ;;
+        cargo|rustc)           echo "rust" ;;
+        go)                    echo "go" ;;
+        make|cmake|ninja)      echo "build" ;;
+        docker|podman)         echo "container" ;;
+        ssh|mosh|mosh-client)  echo "remote" ;;
+        htop|top|btop)         echo "monitor" ;;
+        zsh|bash|sh|fish|login) echo "shell" ;;
+        *)                     echo "$cmd" ;;
+    esac
+}
+
+__tpanel_age() {
+    local seconds="$1"
+    if (( seconds < 60 )); then
+        echo "${seconds}s"
+    elif (( seconds < 3600 )); then
+        echo "$(( seconds / 60 ))m"
+    elif (( seconds < 86400 )); then
+        echo "$(( seconds / 3600 ))h"
+    else
+        echo "$(( seconds / 86400 ))d"
+    fi
+}
+
+tpanel() {
+    if ! tmux list-sessions >/dev/null 2>&1; then
+        echo "tmux is not running"
+        return 1
+    fi
+
+    local now cols
+    now="$(date +%s)"
+    cols="${COLUMNS:-$(tput cols 2>/dev/null || echo 80)}"
+    local label_file="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/session-labels.json"
+    local labels_json=""
+    if [[ -f "$label_file" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            labels_json="$(cat "$label_file")"
+        fi
+    fi
+
+    echo ""
+    printf '  \033[1mtmux session dashboard\033[0m\n'
+    local ruler_len=$(( cols - 4 ))
+    (( ruler_len > 70 )) && ruler_len=70
+    printf '  %s\n' "$(printf '━%.0s' $(seq 1 $ruler_len))"
+    echo ""
+    printf '  \033[2m%-14s %-11s %7s %5s  %-16s %6s\033[0m\n' \
+        "SESSION" "STATUS" "WINDOWS" "PANES" "WORKLOAD" "AGE"
+
+    local total=0 att=0 det=0 total_win=0 total_pane=0
+    local session attached windows created pane_count workload cmd w age age_str
+    local label display_workload status_str color reset
+    local -a pane_cmds
+
+    while IFS='|' read -r session attached windows created; do
+        [[ -n "$session" ]] || continue
+        total=$((total + 1))
+        total_win=$((total_win + windows))
+
+        pane_cmds=("${(@f)$(tmux list-panes -t "$session" -F '#{pane_current_command}' 2>/dev/null)}")
+        pane_count=${#pane_cmds[@]}
+        total_pane=$((total_pane + pane_count))
+
+        workload="shell"
+        for cmd in "${pane_cmds[@]}"; do
+            w="$(__tpanel_workload "$cmd")"
+            if [[ "$w" != "shell" ]]; then
+                workload="$w"
+                break
+            fi
+        done
+
+        age=0
+        if [[ "$created" == <-> ]]; then
+            age=$(( now - created ))
+            (( age < 0 )) && age=0
+        fi
+        age_str="$(__tpanel_age "$age")"
+
+        label=""
+        if [[ -n "$labels_json" ]]; then
+            label="$(echo "$labels_json" | jq -r --arg k "$session" '.[$k] // empty' 2>/dev/null || true)"
+        fi
+        display_workload="$workload"
+        if [[ -n "$label" ]]; then
+            display_workload="${workload} (${label})"
+        fi
+
+        reset='\033[0m'
+        if (( attached > 0 )); then
+            status_str="attached"
+            color='\033[32m'
+            att=$((att + 1))
+        else
+            status_str="detached"
+            det=$((det + 1))
+            if (( pane_count == 1 && windows == 1 )) && [[ "$workload" == "shell" ]]; then
+                color='\033[31m'
+            else
+                color='\033[2m'
+            fi
+        fi
+
+        printf "  ${color}%-14s %-11s %7s %5s  %-16s %6s${reset}\n" \
+            "$session" "$status_str" "$windows" "$pane_count" "$display_workload" "$age_str"
+    done < <(tmux ls -F '#{session_name}|#{session_attached}|#{session_windows}|#{session_created}' 2>/dev/null)
+
+    echo ""
+    printf '  %s\n' "$(printf '━%.0s' $(seq 1 $ruler_len))"
+    printf '  %d sessions (%d attached, %d detached)  |  %d windows  |  %d panes\n' \
+        "$total" "$att" "$det" "$total_win" "$total_pane"
+
+    local dir
+    dir="$(__resurrect_dir 2>/dev/null)" || dir=""
+    if [[ -n "$dir" ]]; then
+        local last_link="$dir/last"
+        if [[ -L "$last_link" || -f "$last_link" ]]; then
+            local target_file
+            target_file="$(readlink "$last_link" 2>/dev/null || echo "")"
+            if [[ -n "$target_file" && -f "$dir/$target_file" ]]; then
+                local mtime snap_age non_shell
+                if [[ "$(uname)" == "Darwin" ]]; then
+                    mtime="$(stat -f%m "$dir/$target_file" 2>/dev/null || echo "$now")"
+                else
+                    mtime="$(stat -c%Y "$dir/$target_file" 2>/dev/null || echo "$now")"
+                fi
+                snap_age=$(( (now - mtime) / 60 ))
+                non_shell="$(__snapshot_non_shell_count "$dir/$target_file")"
+                printf '  Latest snapshot: %dm ago (%d workloads)\n' "$snap_age" "$non_shell"
+            fi
+        fi
+    fi
+    echo ""
+}
+
+thealth() {
+    local errors=0
+    local _ok='\033[32m[OK]\033[0m'
+    local _fail='\033[31m[FAIL]\033[0m'
+    local _warn='\033[33m[WARN]\033[0m'
+    local _info='\033[2m[INFO]\033[0m'
+
+    printf '\033[1m=== tmux persistence health check ===\033[0m\n\n'
+
+    if tmux list-sessions >/dev/null 2>&1; then
+        printf "${_ok} tmux server is running\n"
+    else
+        printf "${_fail} tmux server is not running\n"
+        errors=$((errors + 1))
+    fi
+
+    local resurrect_save="$HOME/.tmux/plugins/tmux-resurrect/scripts/save.sh"
+    if [[ -x "$resurrect_save" ]]; then
+        printf "${_ok} tmux-resurrect plugin installed\n"
+    else
+        printf "${_fail} tmux-resurrect plugin not found: %s\n" "$resurrect_save"
+        errors=$((errors + 1))
+    fi
+
+    local continuum_interval
+    continuum_interval="$(tmux show -gv @continuum-save-interval 2>/dev/null || echo "")"
+    if [[ -n "$continuum_interval" && "$continuum_interval" -gt 0 ]] 2>/dev/null; then
+        printf "${_ok} tmux-continuum save interval: %sm\n" "$continuum_interval"
+    else
+        printf "${_fail} tmux-continuum save interval not set or zero\n"
+        errors=$((errors + 1))
+    fi
+
+    local dir
+    dir="$(__resurrect_dir 2>/dev/null)" || dir=""
+    if [[ -z "$dir" ]]; then
+        printf "${_fail} resurrect directory not found\n"
+        errors=$((errors + 1))
+    else
+        local last_link="$dir/last"
+        if [[ -L "$last_link" || -f "$last_link" ]]; then
+            local target_file
+            target_file="$(readlink "$last_link" 2>/dev/null || echo "")"
+            if [[ -n "$target_file" && -f "$dir/$target_file" ]]; then
+                printf "${_ok} latest snapshot: %s\n" "$target_file"
+                local mtime now age_minutes
+                now="$(date +%s)"
+                if [[ "$(uname)" == "Darwin" ]]; then
+                    mtime="$(stat -f%m "$dir/$target_file" 2>/dev/null || echo "$now")"
+                else
+                    mtime="$(stat -c%Y "$dir/$target_file" 2>/dev/null || echo "$now")"
+                fi
+                age_minutes=$(( (now - mtime) / 60 ))
+                if (( age_minutes <= 10 )); then
+                    printf "${_ok} snapshot age: %sm (fresh)\n" "$age_minutes"
+                elif (( age_minutes <= 60 )); then
+                    printf "${_warn} snapshot age: %sm (stale -- continuum may not be saving)\n" "$age_minutes"
+                else
+                    printf "${_fail} snapshot age: %sm (very stale)\n" "$age_minutes"
+                    errors=$((errors + 1))
+                fi
+
+                local non_shell
+                non_shell="$(__snapshot_non_shell_count "$dir/$target_file")"
+                if (( non_shell > 0 )); then
+                    printf "${_ok} snapshot has %s non-shell pane(s)\n" "$non_shell"
+                else
+                    printf "${_warn} snapshot has only shell panes (no workloads captured)\n"
+                fi
+            else
+                printf "${_fail} latest snapshot symlink target missing: %s\n" "$target_file"
+                errors=$((errors + 1))
+            fi
+        else
+            printf "${_fail} no 'last' symlink in resurrect directory\n"
+            errors=$((errors + 1))
+        fi
+
+        local snap_count
+        snap_count="$(find "$dir" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' 2>/dev/null | wc -l | tr -d ' ')"
+        printf "${_info} total snapshots: %s\n" "$snap_count"
+        if (( snap_count > 100 )); then
+            printf "${_warn} consider running: find %s -name 'tmux_resurrect_*.txt' -mtime +7 | tail -n +6 | xargs rm\n" "$dir"
+        fi
+    fi
+
+    local config_link="$HOME/.config/ghostty/config"
+    local launcher_link="$HOME/.config/ghostty/ghostty-tmux.sh"
+    local tmux_conf_link="$HOME/.tmux.conf"
+    local link_ok=0 lt=""
+    for f in "$config_link" "$launcher_link" "$tmux_conf_link"; do
+        if [[ -L "$f" ]]; then
+            lt="$(readlink "$f" 2>/dev/null || echo "")"
+            if [[ -n "$lt" && -f "$lt" ]]; then
+                link_ok=$((link_ok + 1))
+            else
+                printf "${_fail} broken symlink: %s -> %s\n" "$f" "$lt"
+                errors=$((errors + 1))
+            fi
+        elif [[ -f "$f" ]]; then
+            link_ok=$((link_ok + 1))
+        else
+            printf "${_fail} missing config file: %s\n" "$f"
+            errors=$((errors + 1))
+        fi
+    done
+    if (( link_ok == 3 )); then
+        printf "${_ok} config symlinks valid (%s/3)\n" "$link_ok"
+    fi
+
+    if [[ "$(uname)" == "Darwin" ]]; then
+        if /usr/bin/osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' >/dev/null 2>&1; then
+            printf "${_ok} Accessibility permission granted (auto-fill will work)\n"
+        else
+            printf "${_warn} Accessibility permission not granted (auto-fill tabs will not work)\n"
+        fi
+    fi
+
+    local hook_val
+    hook_val="$(tmux show-hooks -g 2>/dev/null | grep 'client-detached' || echo "")"
+    if [[ -n "$hook_val" && "$hook_val" == *"save.sh"* ]]; then
+        printf "${_ok} save-on-last-detach hook active\n"
+    else
+        printf "${_warn} save-on-last-detach hook not found (reload tmux.conf)\n"
+    fi
+
+    echo ""
+    if (( errors == 0 )); then
+        printf '\033[32mhealth check passed\033[0m\n'
+    else
+        printf '\033[31mhealth check: %d issue(s) found\033[0m\n' "$errors"
+    fi
+
+    return $errors
+}
 
 __tmux_list() {
     tmux ls -F "#{session_name} attached=#{session_attached} windows=#{session_windows}" 2>/dev/null
@@ -25,6 +334,16 @@ __tmux_normalize_target() {
 }
 
 tgo() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<'EOF'
+usage: tgo <session>
+
+Switch to (or attach to) a named tmux session.
+Numeric shorthand: tgo 3 = tgo main-3
+EOF
+        return 0
+    fi
+    __tmux_require_server tgo || return 1
     local target
     target="$(__tmux_normalize_target "${1:-}")"
     if [[ -z "$target" ]]; then
@@ -34,7 +353,7 @@ tgo() {
     fi
 
     if ! tmux has-session -t "$target" 2>/dev/null; then
-        echo "session not found: $target"
+        echo "tgo: session not found: $target" >&2
         __tmux_list
         return 1
     fi
@@ -47,6 +366,15 @@ tgo() {
 }
 
 tnew() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<'EOF'
+usage: tnew [name] [cwd]
+
+Create a new tmux session and attach.
+Without a name, auto-assigns main, main-2, main-3, ...
+EOF
+        return 0
+    fi
     local name="${1:-}"
     local cwd="${2:-$PWD}"
 
@@ -89,6 +417,17 @@ tprev() {
 }
 
 tkill() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<'EOF'
+usage: tkill [session]
+
+Kill a tmux session by name or index.
+Numeric shorthand: tkill 3 = tkill main-3
+Without args inside tmux, kills current session.
+EOF
+        return 0
+    fi
+    __tmux_require_server tkill || return 1
     local target="${1:-}"
 
     if [[ -z "$target" ]]; then
@@ -133,6 +472,15 @@ tkillc() {
 }
 
 tprune() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<'EOF'
+usage: tprune
+
+Kill all detached main-* sessions (preserves current session).
+EOF
+        return 0
+    fi
+    __tmux_require_server tprune || return 1
     local keep=""
     local killed=0
 
@@ -226,10 +574,12 @@ EOF
         fi
         [[ "$windows" == "1" ]] || continue
 
-        pane_count="$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null | wc -l | tr -d '[:space:]')"
+        local pane_info
+        pane_info="$(tmux list-panes -t "$session" -F '#{pane_current_command}' 2>/dev/null)"
+        pane_count="$(echo "$pane_info" | grep -c . 2>/dev/null || echo 0)"
         [[ "$pane_count" == "1" ]] || continue
 
-        cmd="$(tmux list-panes -t "$session" -F '#{pane_current_command}' 2>/dev/null | head -n1 | tr -d '\r')"
+        cmd="$(echo "$pane_info" | head -n1 | tr -d '\r')"
         case "$cmd" in
             zsh|bash|sh|fish) ;;
             *) continue ;;
@@ -262,7 +612,7 @@ EOF
     echo "runaway candidates:"
     local row out_session out_attached out_cmd out_age
     local -a sorted
-    sorted=("${(@On)candidates}")
+    sorted=("${(@on)candidates}")
     for row in "${sorted[@]}"; do
         IFS='|' read -r _ out_session out_attached out_cmd out_age <<< "$row"
         printf '  %s attached=%s cmd=%s age=%ss\n' "$out_session" "$out_attached" "$out_cmd" "$out_age"
@@ -791,3 +1141,96 @@ EOF
 
     "${cmd[@]}"
 }
+
+# --- Session labels ---
+
+tname() {
+    if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+        cat <<'EOF'
+usage: tname [session] [description]
+       tname              -- list all labels
+       tname 3 "API dev"  -- label main-3 as "API dev"
+       tname --clear 3    -- remove label from main-3
+EOF
+        return 0
+    fi
+
+    local label_file="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/session-labels.json"
+
+    if [[ $# -eq 0 ]]; then
+        if [[ ! -f "$label_file" ]]; then
+            echo "no session labels set"
+            return 0
+        fi
+        if command -v jq >/dev/null 2>&1; then
+            jq -r 'to_entries[] | "  \(.key): \(.value)"' "$label_file" 2>/dev/null
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1]))
+for k,v in d.items(): print(f'  {k}: {v}')
+" "$label_file" 2>/dev/null
+        else
+            cat "$label_file"
+        fi
+        return 0
+    fi
+
+    if [[ "$1" == "--clear" ]]; then
+        shift
+        local target="$(__tmux_normalize_target "${1:-}")"
+        [[ -n "$target" ]] || { echo "usage: tname --clear <session>"; return 1; }
+        [[ -f "$label_file" ]] || { echo "no labels file"; return 0; }
+        if command -v jq >/dev/null 2>&1; then
+            local tmp="${label_file}.tmp.$$"
+            jq --arg k "$target" 'del(.[$k])' "$label_file" > "$tmp" && mv "$tmp" "$label_file"
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 -c "
+import json,sys
+f=sys.argv[1]; k=sys.argv[2]
+d=json.load(open(f))
+d.pop(k,None)
+json.dump(d,open(f,'w'),indent=2)
+" "$label_file" "$target"
+        fi
+        echo "cleared label for $target"
+        return 0
+    fi
+
+    local target="$(__tmux_normalize_target "$1")"
+    shift
+    local description="$*"
+    [[ -n "$description" ]] || { echo "usage: tname <session> <description>"; return 1; }
+
+    mkdir -p "$(dirname "$label_file")"
+    [[ -f "$label_file" ]] || echo '{}' > "$label_file"
+
+    if command -v jq >/dev/null 2>&1; then
+        local tmp="${label_file}.tmp.$$"
+        jq --arg k "$target" --arg v "$description" '.[$k] = $v' "$label_file" > "$tmp" && mv "$tmp" "$label_file"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c "
+import json,sys
+f=sys.argv[1]; k=sys.argv[2]; v=sys.argv[3]
+d={}
+try: d=json.load(open(f))
+except: pass
+d[k]=v
+json.dump(d,open(f,'w'),indent=2)
+" "$label_file" "$target" "$description"
+    else
+        echo "jq or python3 required for session labels"
+        return 1
+    fi
+    echo "labeled $target: $description"
+}
+
+# --- Short aliases (thin wrappers for shim compatibility) ---
+
+tk()  { tkill "$@"; }
+tn()  { tnew "$@"; }
+tp()  { tprev "$@"; }
+tpn() { tpanes "$@"; }
+tpr() { tprune "$@"; }
+tra() { trunaway "$@"; }
+th()  { thealth "$@"; }

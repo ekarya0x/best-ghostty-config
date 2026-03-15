@@ -19,7 +19,7 @@ if ! [[ "$AUTO_FILL_RESTORE_MAX_TABS" =~ ^[0-9]+$ ]]; then
     AUTO_FILL_RESTORE_MAX_TABS=12
 fi
 readonly AUTO_FILL_RESTORE_MAX_TABS
-readonly STATE_DIR="${GHOSTTY_TMUX_STATE_DIR:-/tmp}"
+readonly STATE_DIR="${GHOSTTY_TMUX_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/best-ghostty-config}"
 STATE_KEY="${GHOSTTY_TMUX_STATE_KEY:-$(id -u)-${SOCKET_NAME:-default}-${BASE_SESSION}}"
 STATE_KEY="$(printf '%s' "$STATE_KEY" | tr -c 'A-Za-z0-9._-' '_')"
 readonly STATE_KEY
@@ -96,6 +96,9 @@ if [[ -z "$TMUX_BIN" ]]; then
     exit 127
 fi
 
+readonly UNAME="$(uname)"
+NOW_EPOCH="$(date +%s)"
+
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 trace_log() {
@@ -121,12 +124,30 @@ exec_tmux() {
     exec "$TMUX_BIN" "$@"
 }
 
+CACHED_SESSIONS=""
+CACHED_SESSION_COUNT=""
+CACHED_CLIENT_COUNT=""
+
+refresh_tmux_cache() {
+    CACHED_SESSIONS="$(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)"
+    CACHED_SESSION_COUNT="$(printf '%s\n' "$CACHED_SESSIONS" | grep -c . 2>/dev/null; true)"
+    CACHED_CLIENT_COUNT="$(tmux_exec list-clients -F '#{client_pid}' 2>/dev/null | grep -c . 2>/dev/null; true)"
+}
+
 tmux_client_count() {
-    tmux_exec list-clients -F '#{client_pid}' 2>/dev/null | wc -l | tr -d '[:space:]' || echo "0"
+    if [[ -n "$CACHED_CLIENT_COUNT" ]]; then
+        echo "$CACHED_CLIENT_COUNT"
+        return
+    fi
+    tmux_exec list-clients -F '#{client_pid}' 2>/dev/null | grep -c . 2>/dev/null; true
 }
 
 tmux_session_count() {
-    tmux_exec list-sessions -F '#{session_name}' 2>/dev/null | wc -l | tr -d '[:space:]' || echo "0"
+    if [[ -n "$CACHED_SESSION_COUNT" ]]; then
+        echo "$CACHED_SESSION_COUNT"
+        return
+    fi
+    tmux_exec list-sessions -F '#{session_name}' 2>/dev/null | grep -c . 2>/dev/null; true
 }
 
 # ---------------------------------------------------------------------------
@@ -206,14 +227,13 @@ create_next_session() {
 
 file_age_seconds() {
     local file="$1"
-    local mtime now age
-    now="$(date +%s)"
-    if [[ "$(uname)" == "Darwin" ]]; then
-        mtime=$(stat -f%m "$file" 2>/dev/null || echo "$now")
+    local mtime age
+    if [[ "$UNAME" == "Darwin" ]]; then
+        mtime=$(stat -f%m "$file" 2>/dev/null || echo "$NOW_EPOCH")
     else
-        mtime=$(stat -c%Y "$file" 2>/dev/null || echo "$now")
+        mtime=$(stat -c%Y "$file" 2>/dev/null || echo "$NOW_EPOCH")
     fi
-    age=$(( now - mtime ))
+    age=$(( NOW_EPOCH - mtime ))
     # Clamp to 0 if clock skew produces a future mtime.
     (( age < 0 )) && age=0
     echo "$age"
@@ -288,7 +308,7 @@ select_resurrect_snapshot() {
             printf '%s\n' "$f"
             return 0
         fi
-    done < <(find "$dir" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' -print 2>/dev/null | LC_ALL=C sort -r)
+    done < <(find "$dir" -maxdepth 1 -type f -name 'tmux_resurrect_*.txt' -print 2>/dev/null | LC_ALL=C sort -r | head -n 50)
 
     printf '%s\n' "$latest_file"
 }
@@ -319,21 +339,15 @@ set_batch_mode_if_needed() {
 
 session_is_claimed() {
     local session_name="$1"
-    local pid claimed
+    # Any entry in the claimed file = claimed for the duration of the batch.
+    # The file is wiped at batch initialization, so stale entries from
+    # previous batches are already cleaned.  Removing the PID liveness check
+    # eliminates the race between lock release and exec.
+    local line
     while IFS= read -r line; do
         [[ -n "$line" ]] || continue
-        # New format: "<pid> <session>"
         if [[ "$line" =~ ^([0-9]+)[[:space:]]+(.+)$ ]]; then
-            pid="${BASH_REMATCH[1]}"
-            claimed="${BASH_REMATCH[2]}"
-            [[ "$claimed" == "$session_name" ]] || continue
-            if [[ "$pid" == "0" ]]; then
-                return 0
-            fi
-            if kill -0 "$pid" 2>/dev/null; then
-                return 0
-            fi
-            continue
+            [[ "${BASH_REMATCH[2]}" == "$session_name" ]] && return 0
         fi
     done < "$CLAIMED_FILE" 2>/dev/null || true
     return 1
@@ -341,13 +355,10 @@ session_is_claimed() {
 
 claimed_line_count() {
     local count=0
-    local pid
+    local line
     while IFS= read -r line; do
         [[ "$line" =~ ^([0-9]+)[[:space:]]+(.+)$ ]] || continue
-        pid="${BASH_REMATCH[1]}"
-        if [[ "$pid" == "0" ]] || kill -0 "$pid" 2>/dev/null; then
-            count=$((count + 1))
-        fi
+        count=$((count + 1))
     done < "$CLAIMED_FILE" 2>/dev/null || true
     printf '%s\n' "$count"
 }
@@ -362,20 +373,9 @@ append_claimed_session() {
 }
 
 prune_claimed_file() {
-    [[ -f "$CLAIMED_FILE" ]] || return 0
-
-    local tmp="${CLAIMED_FILE}.tmp.$$"
-    : > "$tmp"
-    local pid claimed
-    while IFS= read -r line; do
-        [[ "$line" =~ ^([0-9]+)[[:space:]]+(.+)$ ]] || continue
-        pid="${BASH_REMATCH[1]}"
-        claimed="${BASH_REMATCH[2]}"
-        if [[ "$pid" == "0" ]] || kill -0 "$pid" 2>/dev/null; then
-            printf '%s %s\n' "$pid" "$claimed" >> "$tmp"
-        fi
-    done < "$CLAIMED_FILE" 2>/dev/null || true
-    mv "$tmp" "$CLAIMED_FILE"
+    # Claimed entries are trusted for the duration of the batch.
+    # The file is wiped at batch initialization (ensure_batch_initialized).
+    return 0
 }
 
 wait_for_claim_growth() {
@@ -403,16 +403,31 @@ count_unclaimed_unattached_sessions() {
         if ! session_is_claimed "$name"; then
             count=$((count + 1))
         fi
-    done < <(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)
+    done <<< "${CACHED_SESSIONS:-$(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)}"
 
     printf '%s\n' "$count"
+}
+
+check_accessibility_permission() {
+    [[ "$UNAME" == "Darwin" ]] || return 0
+    # osascript targeting System Events requires Accessibility permission.
+    # A quick non-destructive test: ask System Events for frontmost app name.
+    if /usr/bin/osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' >/dev/null 2>&1; then
+        return 0
+    fi
+    return 1
 }
 
 open_ghostty_tab() {
     # Auto-fill tabs is only needed on macOS where Ghostty restore may reopen
     # fewer tabs than detached tmux sessions.
-    [[ "$(uname)" == "Darwin" ]] || return 1
+    [[ "$UNAME" == "Darwin" ]] || return 1
     [[ -x /usr/bin/osascript ]] || return 1
+
+    if ! check_accessibility_permission; then
+        trace_log "fill open_tab=failed reason=no_accessibility_permission"
+        return 1
+    fi
 
     if /usr/bin/osascript >/dev/null 2>&1 <<'APPLESCRIPT'
 tell application "Ghostty" to activate
@@ -424,7 +439,7 @@ APPLESCRIPT
         trace_log "fill open_tab=ok"
         return 0
     fi
-    trace_log "fill open_tab=failed"
+    trace_log "fill open_tab=failed reason=applescript_error"
     return 1
 }
 
@@ -481,7 +496,13 @@ fill_restore_tabs_if_needed() {
             local before
             before="$(claimed_line_count)"
 
-            open_ghostty_tab || exit 0
+            if ! open_ghostty_tab; then
+                local detached_list=""
+                detached_list="$(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null | awk '$2 == "0" && $1 != "_bgc_restore" { print $1 }' | tr '\n' ' ')"
+                trace_log "fill stop=auto_fill_failed detached_sessions=${detached_list}"
+                tmux_exec display-message "Auto-fill failed (Accessibility?). Detached sessions: ${detached_list}" 2>/dev/null || true
+                exit 0
+            fi
             if ! wait_for_claim_growth "$before"; then
                 trace_log "fill stop=no_claim_growth before=${before} missing=${missing}"
                 exit 0
@@ -523,7 +544,7 @@ find_unattached_session() {
             best="$name"
             best_rank="$rank"
         fi
-    done < <(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)
+    done <<< "${CACHED_SESSIONS:-$(tmux_exec list-sessions -F '#{session_name} #{session_attached}' 2>/dev/null || true)}"
 
     if [[ -n "$best" ]]; then
         printf '%s\n' "$best"
@@ -626,10 +647,36 @@ resurrect_restore_if_needed() {
 
     # Run the restore script (it creates sessions/windows/panes from the
     # save file using normal tmux commands).
-    TMUX="" "$restore_script" 2>/dev/null || true
+    local restore_exit=0
+    local restore_log="${STATE_DIR}/ghostty-tmux-${STATE_KEY}.restore.log"
+    TMUX="" "$restore_script" > "$restore_log" 2>&1 || restore_exit=$?
+    if (( restore_exit != 0 )); then
+        trace_log "restore failed exit=${restore_exit} log=${restore_log}"
+    else
+        trace_log "restore ok log=${restore_log}"
+    fi
 
-    # Give tmux a moment to finish processing restore commands.
-    sleep 1
+    # Wait until sessions appear (up to 2 seconds).  Check for the base
+    # session first, but also accept ANY restored session so we don't
+    # wait the full timeout when the snapshot lacks the base name.
+    local wait_iter=0
+    while (( wait_iter < 20 )); do
+        if tmux_exec has-session -t "$BASE_SESSION" 2>/dev/null; then
+            trace_log "restore base_session_ready iter=${wait_iter}"
+            break
+        fi
+        local restored_count
+        restored_count="$(tmux_exec list-sessions -F '#{session_name}' 2>/dev/null | grep -cv '^_bgc_restore$' 2>/dev/null; true)"
+        if (( restored_count > 0 )); then
+            trace_log "restore sessions_ready count=${restored_count} iter=${wait_iter}"
+            break
+        fi
+        sleep 0.1
+        wait_iter=$((wait_iter + 1))
+    done
+    if (( wait_iter >= 20 )); then
+        trace_log "restore timeout after 2s"
+    fi
 
     # Clean up the bootstrap session if real sessions were restored.
     if tmux_exec has-session -t "$BASE_SESSION" 2>/dev/null; then
@@ -662,6 +709,9 @@ trace_log "launch pending=${pending} no_attach=${NO_ATTACH} force_new=${FORCE_NE
 # 0. If the tmux server is empty (reboot, kill-server) and resurrect has a
 #    saved snapshot, restore it now before making any session decisions.
 resurrect_restore_if_needed
+
+# Cache tmux state once after possible restore, used by all subsequent checks.
+refresh_tmux_cache
 
 # Persist batch mode once per launch burst:
 #   - restore: Ghostty relaunch with detached surviving sessions
